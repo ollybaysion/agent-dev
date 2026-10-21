@@ -288,7 +288,7 @@
 
     /* 넘침 검사 */
     if (check) {
-      requestAnimationFrame(function () {
+      (function () { // 동기 실행: scrollHeight 읽기가 레이아웃을 강제하므로 rAF 를 기다릴 필요가 없다
         var over = [];
         slides.forEach(function (s, i) {
           var dy = s.scrollHeight - s.clientHeight, dx = s.scrollWidth - s.clientWidth;
@@ -303,7 +303,7 @@
         document.body.appendChild(b);
         document.title = b.textContent;
         console.log(b.textContent);
-      });
+      })();
     }
   });
 })();
