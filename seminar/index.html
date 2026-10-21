@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>인증·인가 세미나 시리즈</title>
+<link rel="stylesheet" href="assets/slides.css">
+<style>
+  body { padding: 0 16px 64px; }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+  header.hero { padding: 56px 0 24px; }
+  header.hero .kicker { color: var(--accent); font-weight: 700; letter-spacing: .06em; font-size: 15px; }
+  header.hero h1 { font-size: 40px; margin: 8px 0 10px; line-height: 1.2; letter-spacing: -.01em; }
+  header.hero p { font-size: 18px; color: var(--muted); margin: 0; max-width: 760px; }
+  .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  .top button { background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; font: inherit; font-size: 14px; cursor: pointer; margin-top: 60px; white-space: nowrap; }
+  h2 { font-size: 22px; margin: 40px 0 14px; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .deckcard { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px 18px; display: flex; flex-direction: column; gap: 10px; }
+  .deckcard .n { font-size: 13px; font-weight: 700; color: var(--accent); letter-spacing: .06em; }
+  .deckcard h3 { margin: 0; font-size: 22px; }
+  .deckcard .one { color: var(--muted); font-size: 15.5px; margin: 0; }
+  .deckcard ul { margin: 4px 0 0; padding-left: 20px; font-size: 15px; }
+  .deckcard li { margin: 3px 0; }
+  .deckcard .open { margin-top: auto; align-self: flex-start; background: var(--accent); color: #fff; border-radius: 8px; padding: 8px 14px; text-decoration: none; font-weight: 600; font-size: 15px; }
+  .flow { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; margin: 0; }
+  .flow svg { width: 100%; height: auto; display: block; color: var(--fg); }
+  .flow figcaption { font-size: 14px; color: var(--muted); margin-top: 6px; text-align: center; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+  .box { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; font-size: 15.5px; }
+  .box h3 { margin: 0 0 10px; font-size: 17px; }
+  .box ul, .box ol { margin: 0; padding-left: 20px; }
+  .box li { margin: 4px 0; }
+  .box pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; font-size: 13.5px; overflow-x: auto; margin: 10px 0 0; }
+  .box code { font-family: var(--mono); }
+  .box p code, .box li code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: .92em; }
+  .keys td { padding: 3px 14px 3px 0; }
+  .keys td:first-child { white-space: nowrap; }
+  footer { margin-top: 48px; font-size: 13.5px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <header class="hero">
+      <div class="kicker">세미나 시리즈 · 4회</div>
+      <h1>에이전트 개발자를 위한 인증·인가</h1>
+      <p>SSO → Keycloak → BFF → A2A. Java/Spring 경험은 있지만 SSO·IdP·OAuth를 처음 다루는 에이전트 개발 실무자를 위한 시리즈입니다. 매 회차는 <strong>왜 필요한가 → 개념(그림) → Spring 코드 → 자주 하는 실수 → 다음 회차</strong> 순서로 진행합니다.</p>
+    </header>
+    <button type="button" onclick="SeminarSlides.toggleTheme()">테마 전환</button>
+  </div>
+
+  <figure class="flow">
+    <svg viewBox="0 0 1040 150" role="img" aria-label="네 회차의 흐름: SSO에서 로그인을 한 곳에 모으고, Keycloak으로 그 한 곳을 운영하고, BFF로 토큰을 서버에 두고, A2A로 에이전트 간 위임을 다룬다">
+      <rect x="10" y="30" width="235" height="90" rx="12" class="svg-app"/>
+      <text x="127" y="60" text-anchor="middle" class="svg-text b lg">1 · SSO</text>
+      <text x="127" y="84" text-anchor="middle" class="svg-text small muted">로그인을 한 곳에 맡긴다</text>
+      <text x="127" y="104" text-anchor="middle" class="svg-text xs muted">OIDC · JWT · code flow</text>
+
+      <rect x="275" y="30" width="235" height="90" rx="12" class="svg-idp"/>
+      <text x="392" y="60" text-anchor="middle" class="svg-text b lg">2 · Keycloak</text>
+      <text x="392" y="84" text-anchor="middle" class="svg-text small muted">그 "한 곳"을 직접 운영한다</text>
+      <text x="392" y="104" text-anchor="middle" class="svg-text xs muted">Realm · Client · Role · 검증</text>
+
+      <rect x="540" y="30" width="235" height="90" rx="12" class="svg-token"/>
+      <text x="657" y="60" text-anchor="middle" class="svg-text b lg">3 · BFF</text>
+      <text x="657" y="84" text-anchor="middle" class="svg-text small muted">토큰은 서버가 보관한다</text>
+      <text x="657" y="104" text-anchor="middle" class="svg-text xs muted">쿠키 · 302/401 · CSRF</text>
+
+      <rect x="805" y="30" width="235" height="90" rx="12" class="svg-agent"/>
+      <text x="922" y="60" text-anchor="middle" class="svg-text b lg">4 · A2A</text>
+      <text x="922" y="84" text-anchor="middle" class="svg-text small muted">에이전트는 누구로 부르는가</text>
+      <text x="922" y="104" text-anchor="middle" class="svg-text xs muted">위임 · Token Exchange · MCP</text>
+
+      <path d="M245,75 L272,75" class="svg-line" marker-end="url(#arrow)"/>
+      <path d="M510,75 L537,75" class="svg-line" marker-end="url(#arrow)"/>
+      <path d="M775,75 L802,75" class="svg-line" marker-end="url(#arrow)"/>
+    </svg>
+    <figcaption>앞 회차의 결론이 다음 회차의 전제가 됩니다. 순서대로 보는 것을 권합니다.</figcaption>
+  </figure>
+
+  <h2>회차</h2>
+  <div class="grid">
+    <article class="deckcard">
+      <div class="n">1회차</div>
+      <h3>SSO — 로그인을 한 곳에 맡기기</h3>
+      <p class="one">서비스마다 로그인을 만들던 방식에서 벗어나, 신원 제공자(IdP) 한 곳을 믿는 구조로.</p>
+      <ul>
+        <li>인증(누구냐)과 인가(무엇을 할 수 있냐)의 구분, 401과 403</li>
+        <li>OAuth 2.0 · OIDC · Authorization Code 흐름, 프런트/백 채널</li>
+        <li>JWT 해부와 서명 검증, 세션 vs 토큰</li>
+        <li>Spring <code>oauth2Login()</code>으로 로그인 화면 코드 0줄</li>
+      </ul>
+      <a class="open" href="01_sso.html">슬라이드 열기</a>
+    </article>
+
+    <article class="deckcard">
+      <div class="n">2회차</div>
+      <h3>Keycloak — IdP를 직접 운영하기</h3>
+      <p class="one">Realm, Client, Role, Scope, Mapper가 토큰 안의 어떤 값이 되는지, Spring이 그 토큰을 어떻게 검증하는지.</p>
+      <ul>
+        <li>핵심 객체 지도와 관리 콘솔 설정 순서</li>
+        <li>토큰 발급 두 경로: 사용자(code) vs 에이전트(client credentials)</li>
+        <li>Spring Resource Server: roles 변환기, <code>aud</code> 검증기</li>
+        <li>에이전트용 Service Account 만들고 토큰 받기</li>
+      </ul>
+      <a class="open" href="02_keycloak.html">슬라이드 열기</a>
+    </article>
+
+    <article class="deckcard">
+      <div class="n">3회차</div>
+      <h3>BFF — 토큰을 브라우저에 두지 않기</h3>
+      <p class="one">FE/BE가 나뉘었을 때 토큰은 누가 들고 있어야 하나. SPA+PKCE와 BFF를 비교하고 BFF를 Spring으로 만든다.</p>
+      <ul>
+        <li>페이지 요청은 302, API 요청은 401 — 왜 다르게 응답하나</li>
+        <li>FE 최소 작업: 인터셉터 하나, 401/403 무한 루프 피하기</li>
+        <li>세션(Redis) · CSRF · 로그아웃 · 토큰 갱신 · 같은 출처 배치</li>
+        <li>Spring Cloud Gateway <code>TokenRelay</code></li>
+      </ul>
+      <a class="open" href="03_bff.html">슬라이드 열기</a>
+    </article>
+
+    <article class="deckcard">
+      <div class="n">4회차</div>
+      <h3>A2A — 에이전트 간 인증과 위임</h3>
+      <p class="one">에이전트가 API를 부를 때 "누구"로 부르는가. 사용자 정체성을 잃지 않고 최소 권한으로 위임하는 방법.</p>
+      <ul>
+        <li>위임 모델 A/B/C: 서비스 계정, 패스스루, Token Exchange</li>
+        <li><code>act</code> 클레임과 위임 체인, 멀티 에이전트의 scope/aud 최소화</li>
+        <li>MCP 서버 인증(OAuth 2.1)과 A2A 프로토콜의 Agent Card</li>
+        <li>감사 로그, 사람 승인 게이트, 프롬프트 인젝션을 권한으로 막기</li>
+      </ul>
+      <a class="open" href="04_a2a.html">슬라이드 열기</a>
+    </article>
+  </div>
+
+  <h2>사전 준비</h2>
+  <div class="two">
+    <div class="box">
+      <h3>개발 환경</h3>
+      <ul>
+        <li>JDK 17 이상, Spring Boot 3.x (Spring Security 6.x)</li>
+        <li>Docker Desktop (Keycloak 실습용)</li>
+        <li>HTTP 클라이언트: curl 또는 IntelliJ HTTP Client</li>
+      </ul>
+      <h3 style="margin-top:14px">Keycloak 실습 서버 (2회차부터)</h3>
+<pre><code class="lang-bash">docker run --name kc -p 8180:8080 \
+  -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+  -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+  quay.io/keycloak/keycloak:26.4 start-dev
+# 관리 콘솔: http://localhost:8180  (실습 전용 설정. 운영은 start-dev 금지)</code></pre>
+    </div>
+    <div class="box">
+      <h3>슬라이드 조작법</h3>
+      <table class="keys">
+        <tr><td><kbd>→</kbd> <kbd>Space</kbd></td><td>다음</td></tr>
+        <tr><td><kbd>←</kbd></td><td>이전</td></tr>
+        <tr><td><kbd>O</kbd> / <kbd>Esc</kbd></td><td>발표 모드 ↔ 문서 모드(전체 스크롤)</td></tr>
+        <tr><td><kbd>T</kbd></td><td>라이트 / 다크</td></tr>
+        <tr><td><kbd>N</kbd></td><td>발표자 노트</td></tr>
+        <tr><td><kbd>F</kbd></td><td>전체 화면</td></tr>
+        <tr><td><kbd>?</kbd></td><td>도움말</td></tr>
+        <tr><td>Ctrl+P</td><td>한 장씩 가로 페이지로 인쇄 / PDF 저장</td></tr>
+      </table>
+      <p style="margin:12px 0 0">모두 로컬 파일이며 외부 라이브러리·네트워크를 쓰지 않습니다. 폴더를 그대로 복사해 배포할 수 있습니다. 새 회차는 <code>_template.html</code>을 복사해서 만듭니다.</p>
+    </div>
+  </div>
+
+  <h2>참고 자료</h2>
+  <div class="box">
+    <ul>
+      <li><a href="reference/keycloak_agent_auth.html">Keycloak 기반 에이전트 권한 아키텍처 그림 (사전 정리 문서)</a></li>
+      <li>표준: RFC 6749 (OAuth 2.0), OpenID Connect Core 1.0, RFC 7519 (JWT), RFC 7636 (PKCE), RFC 8693 (Token Exchange), RFC 8707 (Resource Indicators), RFC 9728 (Protected Resource Metadata), OAuth 2.0 for Browser-Based Applications (IETF BCP)</li>
+      <li>문서: Keycloak Server Administration Guide · Spring Security Reference (OAuth2 Login / Resource Server / Client) · Spring Cloud Gateway TokenRelay</li>
+      <li>프로토콜: Model Context Protocol — Authorization · A2A (Agent2Agent) Protocol Specification</li>
+    </ul>
+  </div>
+
+  <footer>작성일 2026-10-21 · 내부 세미나용 로컬 자료</footer>
+</div>
+<script src="assets/slides.js"></script>
+</body>
+</html>

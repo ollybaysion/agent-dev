@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>1회차 · SSO — 로그인을 한 곳에 맡기기</title>
+<link rel="stylesheet" href="assets/slides.css">
+</head>
+<body>
+<main class="deck" data-deck="1회차 · SSO — 로그인을 한 곳에 맡기기" data-index="index.html">
+
+<!-- 1. 제목 -->
+<section class="slide title">
+  <div class="kicker">에이전트 개발자를 위한 인증·인가 세미나 · 1회차</div>
+  <h1>SSO — 로그인을 한 곳에 맡기기</h1>
+  <p class="sub">인증의 기초: IdP, OIDC, JWT</p>
+  <p class="meta">대상: Java/Spring 경험이 있는 에이전트 개발자 · 사전 지식: SSO 없음 · 50분</p>
+</section>
+
+<!-- 2. 시리즈 지도 -->
+<section class="slide">
+  <h2>시리즈 지도 — 4회차의 흐름</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 160" role="img" aria-label="네 회차의 흐름: SSO에서 로그인을 한 곳에 모으고, Keycloak으로 그 한 곳을 운영하고, BFF로 토큰을 서버에 두고, A2A로 에이전트 간 위임을 다룬다">
+      <text x="125" y="20" text-anchor="middle" class="svg-num">▼ 오늘</text>
+      <rect x="0" y="30" width="250" height="100" rx="12" class="svg-app" style="stroke-width:3;stroke:var(--accent)"/>
+      <text x="125" y="62" text-anchor="middle" class="svg-text b lg">1 · SSO</text>
+      <text x="125" y="88" text-anchor="middle" class="svg-text small muted">로그인을 한 곳에 맡긴다</text>
+      <text x="125" y="108" text-anchor="middle" class="svg-text small muted">OIDC · JWT · code flow</text>
+
+      <rect x="295" y="30" width="250" height="100" rx="12" class="svg-idp"/>
+      <text x="420" y="62" text-anchor="middle" class="svg-text b lg">2 · Keycloak</text>
+      <text x="420" y="88" text-anchor="middle" class="svg-text small muted">그 "한 곳"을 직접 운영한다</text>
+      <text x="420" y="108" text-anchor="middle" class="svg-text small muted">Realm · Client · Role · 검증</text>
+
+      <rect x="590" y="30" width="250" height="100" rx="12" class="svg-token"/>
+      <text x="715" y="62" text-anchor="middle" class="svg-text b lg">3 · BFF</text>
+      <text x="715" y="88" text-anchor="middle" class="svg-text small muted">토큰을 브라우저에 두지 않는다</text>
+      <text x="715" y="108" text-anchor="middle" class="svg-text small muted">쿠키 · 302/401 · CSRF</text>
+
+      <rect x="885" y="30" width="250" height="100" rx="12" class="svg-agent"/>
+      <text x="1010" y="62" text-anchor="middle" class="svg-text b lg">4 · A2A</text>
+      <text x="1010" y="88" text-anchor="middle" class="svg-text small muted">에이전트가 누구로 부르는가</text>
+      <text x="1010" y="108" text-anchor="middle" class="svg-text small muted">Token Exchange · act · MCP · A2A</text>
+
+      <path d="M250,80 L292,80" class="svg-line" marker-end="url(#arrow)"/>
+      <path d="M545,80 L587,80" class="svg-line" marker-end="url(#arrow)"/>
+      <path d="M840,80 L882,80" class="svg-line" marker-end="url(#arrow)"/>
+    </svg>
+    <figcaption>앞 회차의 결론이 다음 회차의 전제가 된다.</figcaption>
+  </figure>
+  <div class="cols mt">
+    <div class="card note">
+      <h3>이 시리즈가 다루는 것</h3>
+      <p>사람과 에이전트가 <strong>누구인지 증명</strong>하고, <strong>허락된 것만</strong> 하게 만드는 구조. 전부 Spring으로 구현한다.</p>
+    </div>
+    <div class="card">
+      <h3>다루지 않는 것</h3>
+      <p>암호학 이론, Keycloak 운영(HA·백업), LDAP/AD 연동 세부, 모바일 앱 인증.</p>
+    </div>
+  </div>
+  <aside class="notes">네 회차는 독립 강의가 아니라 한 줄기다. 1회차에서 "토큰을 받는 법"을, 2회차에서 "토큰에 무엇이 들어가고 어떻게 검증하는지"를, 3회차에서 "브라우저가 있을 때 토큰을 어디 둘지"를, 4회차에서 "에이전트가 남을 대신해 부를 때"를 다룬다.</aside>
+</section>
+
+<!-- 3. 오늘의 목표 -->
+<section class="slide">
+  <h2>오늘의 목표</h2>
+  <div class="cols w-3-2 middle">
+    <ol class="steps">
+      <li><strong>인증과 인가를 구분</strong>해서 말할 수 있다 — 401과 403이 왜 다른지</li>
+      <li><strong>Authorization Code 흐름</strong>을 그림 없이 설명할 수 있다 — 왜 code를 거치는지, 토큰 3종이 각각 어디로 가는지</li>
+      <li>Spring Boot 앱에 <strong>SSO 로그인을 붙일 수 있다</strong> — 로그인 화면 코드 0줄로</li>
+    </ol>
+    <div class="stack">
+      <div class="card note">
+        <h3>전제</h3>
+        <p>Spring MVC, Filter, 세션 쿠키는 안다. SSO·OAuth·IdP·JWT는 처음이라고 가정한다.</p>
+      </div>
+      <div class="card">
+        <h3>진행</h3>
+        <p>① 왜 필요한가 → ② 개념(그림) → ③ Spring 코드 → ④ 자주 하는 실수</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4. 섹션 1 -->
+<section class="slide section">
+  <div class="num">01</div>
+  <h2>왜 필요한가</h2>
+  <p>서비스마다 로그인을 만들면 생기는 일</p>
+</section>
+
+<!-- 5. 문제: 서비스마다 로그인 -->
+<section class="slide">
+  <h2>문제 — 서비스마다 로그인을 따로 만든다</h2>
+  <div class="cols w-3-2 middle">
+    <figure class="diagram">
+      <svg viewBox="0 0 660 380" role="img" aria-label="사용자 한 명이 앱 A, B, C에 각각 다른 비밀번호로 로그인하고, 앱마다 회원 DB를 따로 둔 구조">
+        <rect x="245" y="8" width="410" height="368" rx="12" class="svg-ghost"/>
+        <text x="450" y="366" text-anchor="middle" class="svg-text small muted">서비스마다 로그인·회원 DB·보안 패치를 따로</text>
+
+        <rect x="10" y="160" width="120" height="60" rx="10" class="svg-user"/>
+        <text x="70" y="195" text-anchor="middle" class="svg-text b">사용자 kim</text>
+        <text x="70" y="245" text-anchor="middle" class="svg-text small muted">비밀번호 3개 기억</text>
+
+        <!-- 앱 A -->
+        <rect x="260" y="30" width="170" height="60" rx="10" class="svg-app"/>
+        <text x="345" y="66" text-anchor="middle" class="svg-text b">앱 A · 보고서</text>
+        <ellipse cx="570" cy="76" rx="70" ry="8" class="svg-group"/>
+        <rect x="500" y="34" width="140" height="42" style="fill:var(--bg)"/>
+        <path d="M500,34 V76 M640,34 V76" class="svg-line muted"/>
+        <ellipse cx="570" cy="34" rx="70" ry="8" class="svg-group"/>
+        <text x="570" y="60" text-anchor="middle" class="svg-text small">회원 DB A</text>
+        <path d="M430,60 L498,60" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="464" y="50" text-anchor="middle" class="svg-text xs muted">자체 검증</text>
+
+        <!-- 앱 B -->
+        <rect x="260" y="160" width="170" height="60" rx="10" class="svg-app"/>
+        <text x="345" y="196" text-anchor="middle" class="svg-text b">앱 B · 검색</text>
+        <ellipse cx="570" cy="206" rx="70" ry="8" class="svg-group"/>
+        <rect x="500" y="164" width="140" height="42" style="fill:var(--bg)"/>
+        <path d="M500,164 V206 M640,164 V206" class="svg-line muted"/>
+        <ellipse cx="570" cy="164" rx="70" ry="8" class="svg-group"/>
+        <text x="570" y="190" text-anchor="middle" class="svg-text small">회원 DB B</text>
+        <path d="M430,190 L498,190" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="464" y="180" text-anchor="middle" class="svg-text xs muted">자체 검증</text>
+
+        <!-- 앱 C -->
+        <rect x="260" y="290" width="170" height="60" rx="10" class="svg-app"/>
+        <text x="345" y="326" text-anchor="middle" class="svg-text b">앱 C · 에이전트 포털</text>
+        <ellipse cx="570" cy="336" rx="70" ry="8" class="svg-group"/>
+        <rect x="500" y="294" width="140" height="42" style="fill:var(--bg)"/>
+        <path d="M500,294 V336 M640,294 V336" class="svg-line muted"/>
+        <ellipse cx="570" cy="294" rx="70" ry="8" class="svg-group"/>
+        <text x="570" y="320" text-anchor="middle" class="svg-text small">회원 DB C</text>
+        <path d="M430,320 L498,320" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="464" y="310" text-anchor="middle" class="svg-text xs muted">자체 검증</text>
+
+        <!-- 사용자 → 앱 -->
+        <path d="M130,180 L258,62" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="178" y="112" text-anchor="middle" class="svg-text small">비밀번호 A</text>
+        <path d="M130,190 L258,190" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="194" y="182" text-anchor="middle" class="svg-text small">비밀번호 B</text>
+        <path d="M130,200 L258,318" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="178" y="276" text-anchor="middle" class="svg-text small">비밀번호 C</text>
+      </svg>
+      <figcaption>같은 사람인데 서비스마다 다른 계정, 다른 비밀번호, 다른 회원 DB.</figcaption>
+    </figure>
+    <div class="stack">
+      <div class="card bad">
+        <h3>N배로 늘어나는 것</h3>
+        <ul>
+          <li>사용자: 비밀번호 N개</li>
+          <li>퇴사자 계정 정리: N곳</li>
+          <li>비밀번호 정책·MFA·보안 패치: N번</li>
+          <li>감사(누가 언제 로그인했나): N개 로그</li>
+        </ul>
+      </div>
+      <div class="card warn">
+        <p>서비스나 에이전트가 <strong>하나 늘 때마다 같은 일을 반복</strong>한다. 에이전트 플랫폼에서는 이 N이 빠르게 커진다.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">청중에게 "지금 몇 개 시스템에 따로 로그인하는지" 물어보면 좋다. 핵심은 보안보다 운영 비용이 먼저 체감된다는 점. 그리고 에이전트가 늘어나면 '사용자'뿐 아니라 '프로그램 계정'도 N배가 된다.</aside>
+</section>
+
+<!-- 6. 용어: 인증 vs 인가 -->
+<section class="slide">
+  <h2>용어 — 인증(Authentication)과 인가(Authorization)</h2>
+  <table>
+    <thead><tr><th style="width:16%"></th><th>인증 · Authentication (AuthN)</th><th>인가 · Authorization (AuthZ)</th></tr></thead>
+    <tbody>
+      <tr><td>질문</td><td><strong>당신은 누구인가?</strong></td><td><strong>당신은 이것을 해도 되는가?</strong></td></tr>
+      <tr><td>순서</td><td>먼저</td><td>인증이 끝난 뒤</td></tr>
+      <tr><td>실패 응답</td><td><code>401 Unauthorized</code> — 이름과 달리 "인증 안 됨"</td><td><code>403 Forbidden</code> — 누군지는 알지만 권한 없음</td></tr>
+      <tr><td>비유</td><td>사원증 발급 (신분 확인)</td><td>문마다 다른 출입 권한</td></tr>
+      <tr><td>이 시리즈</td><td>1·3회차 (SSO, BFF)</td><td>2·4회차 (Role, scope, 위임)</td></tr>
+      <tr><td>Spring</td><td><code>oauth2Login()</code>, <code>oauth2ResourceServer()</code></td><td><code>authorizeHttpRequests()</code>, <code>@PreAuthorize</code></td></tr>
+    </tbody>
+  </table>
+  <div class="card note mt">
+    <p><strong>401이면 로그인으로 보내고, 403이면 안내만 한다.</strong> 둘을 섞으면 3회차에서 보게 될 "무한 리다이렉트 루프"가 생긴다.</p>
+  </div>
+  <aside class="notes">SSO는 인증 문제를 푼다. 인가는 그 다음 문제이며, 토큰 안의 role/scope로 푼다(2회차). 401의 이름이 Unauthorized라서 헷갈리는데, 실제 의미는 Unauthenticated다.</aside>
+</section>
+
+<!-- 7. SSO의 아이디어 -->
+<section class="slide">
+  <h2>SSO의 아이디어 — 로그인은 한 곳에서, 앱은 결과만 믿는다</h2>
+  <div class="cols w-2-3 middle">
+    <div>
+      <ul>
+        <li><strong>IdP</strong> (Identity Provider, 신원 제공자): 로그인을 전담하는 서버</li>
+        <li>앱은 비밀번호를 <strong>보지도, 저장하지도</strong> 않는다</li>
+        <li>앱이 받는 것은 IdP가 서명한 <strong>토큰</strong>뿐</li>
+        <li>앱 → IdP 관계는 "신뢰": IdP 공개키로 토큰의 진위를 확인</li>
+      </ul>
+      <div class="card note">
+        <h3>사원증 비유</h3>
+        <p>인사팀(IdP)이 사원증(토큰)을 한 번 발급하면, 모든 문의 리더기(앱)는 사원증만 확인한다. 리더기는 인사 DB를 들여다보지 않는다.</p>
+      </div>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 660 420" role="img" aria-label="사용자가 IdP에서 한 번 로그인해 토큰을 받고, 그 토큰을 앱 A, B, C와 에이전트에 제시한다. 앱들은 IdP의 공개키로 토큰을 검증한다">
+        <!-- ① 로그인 -->
+        <path d="M70,190 L70,30 L578,30 L578,148" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="330" y="22" text-anchor="middle" class="svg-text small">① 로그인은 여기서 한 번</text>
+        <!-- ② 토큰 -->
+        <path d="M578,262 L578,392 L70,392 L70,252" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="330" y="384" text-anchor="middle" class="svg-text small token">② 토큰(사원증) 발급</text>
+
+        <rect x="10" y="190" width="120" height="60" rx="10" class="svg-user"/>
+        <text x="70" y="225" text-anchor="middle" class="svg-text b">사용자</text>
+
+        <rect x="500" y="150" width="156" height="110" rx="12" class="svg-idp"/>
+        <text x="578" y="185" text-anchor="middle" class="svg-text b lg">IdP</text>
+        <text x="578" y="208" text-anchor="middle" class="svg-text small">Identity Provider</text>
+        <text x="578" y="230" text-anchor="middle" class="svg-text small muted">= Keycloak (2회차)</text>
+        <text x="566" y="288" text-anchor="end" class="svg-text small idp">점선 = 신뢰</text>
+        <text x="566" y="304" text-anchor="end" class="svg-text small idp">= IdP 공개키로</text>
+        <text x="566" y="320" text-anchor="end" class="svg-text small idp">토큰 검증</text>
+
+        <rect x="260" y="50" width="160" height="48" rx="10" class="svg-app"/>
+        <text x="340" y="79" text-anchor="middle" class="svg-text b">앱 A</text>
+        <rect x="260" y="135" width="160" height="48" rx="10" class="svg-app"/>
+        <text x="340" y="164" text-anchor="middle" class="svg-text b">앱 B</text>
+        <rect x="260" y="220" width="160" height="48" rx="10" class="svg-app"/>
+        <text x="340" y="249" text-anchor="middle" class="svg-text b">앱 C</text>
+        <rect x="260" y="305" width="160" height="48" rx="10" class="svg-agent"/>
+        <text x="340" y="334" text-anchor="middle" class="svg-text b">에이전트</text>
+
+        <!-- ③ 토큰 제시 -->
+        <path d="M130,210 L258,76" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="165" y="130" text-anchor="middle" class="svg-text small">③ 토큰 제시</text>
+        <path d="M130,218 L258,160" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="200" y="176" text-anchor="middle" class="svg-text small">③</text>
+        <path d="M130,226 L258,243" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="195" y="224" text-anchor="middle" class="svg-text small">③</text>
+        <path d="M130,234 L258,328" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="160" y="292" text-anchor="middle" class="svg-text small">③</text>
+
+        <!-- 신뢰 (공개키) -->
+        <path d="M420,74 L498,186" class="svg-line dashed idp"/>
+        <path d="M420,159 L498,198" class="svg-line dashed idp"/>
+        <path d="M420,244 L498,212" class="svg-line dashed idp"/>
+        <path d="M420,329 L498,226" class="svg-line dashed idp"/>
+      </svg>
+      <figcaption>앱이 늘어도 로그인 구현은 늘지 않는다. 앱은 "토큰 검증"만 추가하면 된다.</figcaption>
+    </figure>
+  </div>
+  <aside class="notes">여기서 "앱이 비밀번호를 보지 않는다"를 강조한다. 이게 SSO의 보안상 핵심이다. 에이전트도 IdP가 발급한 토큰을 받는 '앱'의 하나라는 점을 미리 짚어 두면 4회차가 자연스럽다.</aside>
+</section>
+
+<!-- 8. 한 번 로그인이 되는 원리 -->
+<section class="slide">
+  <h2>"한 번 로그인"이 되는 원리 — IdP 세션 쿠키</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 410" role="img" aria-label="앱 A 접속 시 IdP에서 로그인하면 IdP 세션 쿠키가 생기고, 이후 앱 B 접속 시 IdP가 그 쿠키를 보고 로그인 화면 없이 즉시 통과시킨다">
+      <rect x="30" y="10" width="180" height="40" rx="8" class="svg-user"/>
+      <text x="120" y="36" text-anchor="middle" class="svg-text b">브라우저</text>
+      <rect x="310" y="10" width="180" height="40" rx="8" class="svg-app"/>
+      <text x="400" y="36" text-anchor="middle" class="svg-text b">앱 A</text>
+      <rect x="590" y="10" width="180" height="40" rx="8" class="svg-app"/>
+      <text x="680" y="36" text-anchor="middle" class="svg-text b">앱 B</text>
+      <rect x="890" y="10" width="200" height="40" rx="8" class="svg-idp"/>
+      <text x="990" y="36" text-anchor="middle" class="svg-text b">IdP</text>
+
+      <line x1="120" y1="50" x2="120" y2="400" class="svg-lifeline"/>
+      <line x1="400" y1="50" x2="400" y2="400" class="svg-lifeline"/>
+      <line x1="680" y1="50" x2="680" y2="400" class="svg-lifeline"/>
+      <line x1="990" y1="50" x2="990" y2="400" class="svg-lifeline"/>
+
+      <rect x="20" y="248" width="1100" height="148" rx="10" class="svg-ghost"/>
+      <text x="1110" y="266" text-anchor="end" class="svg-text small ok b">두 번째 앱부터 로그인 화면 없음 = SSO</text>
+
+      <path d="M120,80 L392,80" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="260" y="72" text-anchor="middle" class="svg-text small">① 앱 A 접속</text>
+      <path d="M400,118 L128,118" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="260" y="110" text-anchor="middle" class="svg-text small">② 302 → IdP 로그인 주소</text>
+      <path d="M120,156 L982,156" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="550" y="148" text-anchor="middle" class="svg-text small">③ 로그인 화면 · 아이디/비밀번호 입력</text>
+      <rect x="790" y="172" width="190" height="34" rx="8" class="svg-token"/>
+      <text x="885" y="194" text-anchor="middle" class="svg-text small b token">IdP 세션 쿠키 발급</text>
+      <path d="M990,226 L128,226" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="550" y="218" text-anchor="middle" class="svg-text small">④ 302 → 앱 A (code 포함) → 앱 A 로그인 완료</text>
+
+      <path d="M120,290 L672,290" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="400" y="282" text-anchor="middle" class="svg-text small">⑤ 앱 B 접속</text>
+      <path d="M680,326 L128,326" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="400" y="318" text-anchor="middle" class="svg-text small">⑥ 302 → IdP 로그인 주소</text>
+      <path d="M120,358 L982,358" class="svg-line ok" marker-end="url(#arrow-ok)"/>
+      <text x="550" y="350" text-anchor="middle" class="svg-text small ok">⑦ IdP 세션 쿠키 자동 첨부 → 화면 없이 통과</text>
+      <path d="M990,390 L128,390" class="svg-line ok" marker-end="url(#arrow-ok)"/>
+      <text x="550" y="382" text-anchor="middle" class="svg-text small ok">⑧ 302 → 앱 B (code 포함) 즉시</text>
+    </svg>
+    <figcaption>SSO의 "한 번"은 IdP 도메인의 세션 쿠키가 만든다. 앱 A와 앱 B는 서로를 모른다 — 둘 다 IdP만 안다.</figcaption>
+  </figure>
+  <aside class="notes">앱은 여전히 각자 302로 IdP에 보낸다. 다만 IdP가 자기 쿠키를 보고 로그인 화면을 생략한다. 그래서 '로그아웃'도 앱 세션과 IdP 세션 두 개를 끊어야 한다(뒤에서 다룸).</aside>
+</section>
+
+<!-- 9. 섹션 2 -->
+<section class="slide section">
+  <div class="num">02</div>
+  <h2>개념</h2>
+  <p>표준, 역할, 흐름, 토큰</p>
+</section>
+
+<!-- 10. 표준 지도 -->
+<section class="slide">
+  <h2>표준 지도 — SAML, OAuth 2.0, OIDC</h2>
+  <table>
+    <thead><tr><th style="width:14%">표준</th><th style="width:14%">등장</th><th style="width:22%">형식</th><th>답하는 질문</th><th style="width:26%">주 용도</th></tr></thead>
+    <tbody>
+      <tr><td><strong>SAML 2.0</strong></td><td>2005</td><td>XML, 브라우저 POST</td><td>이 사람은 누구인가 (SSO)</td><td>레거시 기업 SSO, 외부 SaaS 연동</td></tr>
+      <tr><td><strong>OAuth 2.0</strong></td><td>2012 (RFC 6749)</td><td>JSON, HTTP 리다이렉트</td><td>이 앱이 <strong>내 대신</strong> API를 써도 되는가</td><td>API 접근 위임 — <em>인가</em> 프레임워크</td></tr>
+      <tr><td><strong>OIDC</strong><br><span class="small muted">OpenID Connect</span></td><td>2014</td><td>OAuth 2.0 + <strong>ID Token</strong>(JWT)</td><td>누구인가 <strong>+</strong> API를 써도 되는가</td><td>현대 웹·모바일·에이전트 SSO</td></tr>
+    </tbody>
+  </table>
+  <div class="cols mt">
+    <div class="card note">
+      <h3>이 시리즈는 OIDC</h3>
+      <p>OIDC = OAuth 2.0 위에 "로그인(누구인지)"을 얹은 것. 그래서 OAuth 2.0 용어와 흐름을 그대로 쓴다.</p>
+    </div>
+    <div class="card">
+      <h3>Keycloak은 셋 다 지원</h3>
+      <p>SAML은 기존 시스템 연동 때만 만난다. 새로 만드는 앱·API·에이전트는 OIDC로 통일한다.</p>
+    </div>
+  </div>
+  <aside class="notes">OAuth 2.0 자체는 인증 프로토콜이 아니라는 점을 짚는다. "Google로 로그인"은 OAuth가 아니라 OIDC다. OAuth만으로 로그인을 흉내 내던 시절의 문제(ID Token 없음, 토큰 대상 불명확)를 OIDC가 정리했다.</aside>
+</section>
+
+<!-- 11. OAuth 2.0 역할 4가지 -->
+<section class="slide">
+  <h2>OAuth 2.0의 등장인물 4명</h2>
+  <div class="cols w-2-3 middle">
+    <div>
+      <ul>
+        <li><strong>Resource Owner</strong> — 자원의 주인. 보통 <em>사용자</em></li>
+        <li><strong>Client</strong> — 사용자 대신 API를 쓰려는 <em>앱·에이전트</em><br><span class="small muted">Spring: <code>spring-boot-starter-oauth2-client</code></span></li>
+        <li><strong>Authorization Server</strong> — 로그인·동의를 받고 토큰을 발급. <em>IdP = Keycloak</em></li>
+        <li><strong>Resource Server</strong> — 토큰을 검증하고 자원을 주는 <em>업무 API</em><br><span class="small muted">Spring: <code>spring-boot-starter-oauth2-resource-server</code></span></li>
+      </ul>
+      <div class="card warn">
+        <p>하나의 Spring 앱이 <strong>Client이면서 Resource Server</strong>일 수 있다. BFF(3회차)가 그렇다.</p>
+      </div>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 660 360" role="img" aria-label="사용자가 Authorization Server에 로그인하면 Client에게 토큰이 발급되고, Client는 그 토큰으로 Resource Server를 호출하며, Resource Server는 Authorization Server의 공개키로 토큰을 검증한다">
+        <rect x="30" y="30" width="200" height="70" rx="10" class="svg-user"/>
+        <text x="130" y="58" text-anchor="middle" class="svg-text b">Resource Owner</text>
+        <text x="130" y="82" text-anchor="middle" class="svg-text small muted">사용자 kim</text>
+
+        <rect x="430" y="30" width="200" height="70" rx="10" class="svg-idp"/>
+        <text x="530" y="58" text-anchor="middle" class="svg-text b">Authorization Server</text>
+        <text x="530" y="82" text-anchor="middle" class="svg-text small muted">IdP = Keycloak</text>
+
+        <rect x="30" y="250" width="200" height="70" rx="10" class="svg-app"/>
+        <text x="130" y="278" text-anchor="middle" class="svg-text b">Client</text>
+        <text x="130" y="302" text-anchor="middle" class="svg-text small muted">앱 · 에이전트</text>
+
+        <rect x="430" y="250" width="200" height="70" rx="10" class="svg-app"/>
+        <text x="530" y="278" text-anchor="middle" class="svg-text b">Resource Server</text>
+        <text x="530" y="302" text-anchor="middle" class="svg-text small muted">업무 API</text>
+
+        <path d="M230,65 L428,65" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="330" y="56" text-anchor="middle" class="svg-text small">① 로그인 · 동의</text>
+
+        <path d="M470,100 L190,248" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="300" y="165" text-anchor="middle" class="svg-text small token">② 토큰 발급</text>
+
+        <path d="M230,285 L428,285" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="330" y="276" text-anchor="middle" class="svg-text small">③ Bearer 토큰으로 호출</text>
+
+        <path d="M560,250 L560,102" class="svg-line dashed idp" marker-end="url(#arrow-idp)"/>
+        <text x="572" y="180" class="svg-text small idp">④ 공개키로</text>
+        <text x="572" y="196" class="svg-text small idp">토큰 검증</text>
+
+        <path d="M90,100 L90,248" class="svg-line dashed muted" marker-end="url(#arrow-muted)"/>
+        <text x="98" y="178" class="svg-text small muted">사용</text>
+      </svg>
+      <figcaption>④가 핵심: Resource Server는 매 요청마다 IdP에 묻지 않고 공개키로 검증한다.</figcaption>
+    </figure>
+  </div>
+  <aside class="notes">Spring 문서가 이 용어를 그대로 쓴다. oauth2Login/oauth2Client는 Client 역할, oauth2ResourceServer는 Resource Server 역할이다. 이 네 단어만 외워도 문서가 읽힌다.</aside>
+</section>
+
+<!-- 12. Authorization Code Flow -->
+<section class="slide">
+  <h2>핵심 흐름 — Authorization Code Flow (+ PKCE)</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 435" role="img" aria-label="브라우저, 앱 서버, IdP, API 사이의 Authorization Code 흐름: 302 리다이렉트로 로그인하고, code를 서버 간 통신으로 토큰과 교환한 뒤, Bearer 토큰으로 API를 호출한다">
+      <rect x="25" y="10" width="170" height="40" rx="8" class="svg-user"/>
+      <text x="110" y="36" text-anchor="middle" class="svg-text b">브라우저</text>
+      <rect x="335" y="10" width="170" height="40" rx="8" class="svg-app"/>
+      <text x="420" y="36" text-anchor="middle" class="svg-text b">앱 서버 (Spring)</text>
+      <rect x="675" y="10" width="170" height="40" rx="8" class="svg-idp"/>
+      <text x="760" y="36" text-anchor="middle" class="svg-text b">IdP (Keycloak)</text>
+      <rect x="945" y="10" width="170" height="40" rx="8" class="svg-app"/>
+      <text x="1030" y="36" text-anchor="middle" class="svg-text b">업무 API</text>
+
+      <line x1="110" y1="50" x2="110" y2="425" class="svg-lifeline"/>
+      <line x1="420" y1="50" x2="420" y2="425" class="svg-lifeline"/>
+      <line x1="760" y1="50" x2="760" y2="425" class="svg-lifeline"/>
+      <line x1="1030" y1="50" x2="1030" y2="425" class="svg-lifeline"/>
+
+      <path d="M110,80 L412,80" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="265" y="72" text-anchor="middle" class="svg-text small">① GET /reports — 세션 없음</text>
+
+      <path d="M420,116 L118,116" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="265" y="108" text-anchor="middle" class="svg-text small">② 302 → IdP 로그인 주소 (client_id · state · PKCE)</text>
+
+      <path d="M110,152 L752,152" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="435" y="144" text-anchor="middle" class="svg-text small">③ 로그인 화면 → 아이디/비밀번호 (IdP 세션 쿠키 생성)</text>
+
+      <path d="M760,188 L118,188" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="435" y="180" text-anchor="middle" class="svg-text small">④ 302 → 앱 callback?code=xyz&amp;state=…</text>
+
+      <path d="M110,224 L412,224" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="265" y="216" text-anchor="middle" class="svg-text small">⑤ GET /login/oauth2/code/keycloak?code=…</text>
+
+      <path d="M420,260 L752,260" class="svg-line idp" marker-end="url(#arrow-idp)"/>
+      <text x="590" y="252" text-anchor="middle" class="svg-text small idp">⑥ POST /token — code + client_secret + code_verifier</text>
+
+      <path d="M760,296 L428,296" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="590" y="288" text-anchor="middle" class="svg-text small token">⑦ access · ID · refresh 토큰 (JSON)</text>
+
+      <path d="M420,332 L1022,332" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="725" y="324" text-anchor="middle" class="svg-text small token">⑧ GET /api/data — Authorization: Bearer &lt;access&gt;</text>
+
+      <path d="M1030,368 L428,368" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="725" y="360" text-anchor="middle" class="svg-text small">⑨ 200 OK (서명·exp·aud 검증 후)</text>
+
+      <path d="M420,404 L118,404" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="265" y="396" text-anchor="middle" class="svg-text small">⑩ 200 화면 + 앱 세션 쿠키</text>
+    </svg>
+    <figcaption>검은색 = 프런트 채널(브라우저 경유) · 파란색 = 백 채널(서버 간) · 노란색 = 토큰 이동. ⑥에서 처음으로 브라우저를 거치지 않는다.</figcaption>
+  </figure>
+  <aside class="notes">②~⑤는 전부 브라우저가 보는 URL이다. 토큰은 ⑥⑦에서 서버끼리만 주고받는다. 이 분리가 이 흐름의 존재 이유다. ⑤의 경로 /login/oauth2/code/{registrationId}는 Spring Security 기본값이고 Keycloak Client의 Valid redirect URIs에 등록해야 한다.</aside>
+</section>
+
+<!-- 13. 왜 code를 거치나 -->
+<section class="slide">
+  <h2>왜 토큰을 바로 주지 않고 code를 거치나</h2>
+  <div class="cols">
+    <div class="card bad">
+      <h3>❌ 토큰을 브라우저 URL로 주면</h3>
+      <ul>
+        <li>브라우저 <strong>히스토리</strong>에 남는다</li>
+        <li>웹서버·프록시 <strong>접근 로그</strong>에 남는다</li>
+        <li>다음 페이지로 갈 때 <strong>Referer 헤더</strong>로 외부에 새어 나간다</li>
+        <li>브라우저 확장 프로그램이 읽을 수 있다</li>
+      </ul>
+      <p class="small muted">옛 "Implicit Flow"가 이렇게 했고, 지금은 사용 금지.</p>
+    </div>
+    <div class="card ok">
+      <h3>✅ code를 거치면</h3>
+      <ul>
+        <li>code는 <strong>1회용</strong>, 수명 <strong>약 1분</strong></li>
+        <li>code → 토큰 교환에 <strong>client_secret</strong>이 필요 → URL에서 code를 훔쳐도 쓸모없다</li>
+        <li>토큰은 <strong>서버 간 백 채널</strong>로만 이동</li>
+        <li><code>state</code>로 요청·응답을 짝지어 CSRF 차단</li>
+      </ul>
+    </div>
+  </div>
+  <div class="card note mt">
+    <h3>PKCE (Proof Key for Code Exchange, "픽시")</h3>
+    <p>secret을 가질 수 없는 앱(SPA, 모바일)을 위한 보완. 앱이 난수 <code>code_verifier</code>를 만들고 그 해시 <code>code_challenge</code>를 ②에 보낸 뒤, ⑥에서 원본을 제시한다. code를 가로챈 쪽은 원본을 몰라 교환하지 못한다. 서버 앱도 켜 두는 것이 현재 권고.</p>
+  </div>
+  <aside class="notes">"한 단계 더 거치는 게 왜 더 안전하냐"는 질문이 꼭 나온다. 답은 '브라우저에 보이는 것(code)'과 '진짜 열쇠(토큰)'를 분리했기 때문이다. code 자체는 secret 없이는 무용지물이다.</aside>
+</section>
+
+<!-- 14. 토큰 3종 -->
+<section class="slide">
+  <h2>토큰 3종 — 각각 누가 읽고 어디로 가나</h2>
+  <table>
+    <thead><tr><th style="width:17%">토큰</th><th style="width:19%">누가 읽나</th><th>담는 것</th><th style="width:15%">수명 (예)</th><th style="width:24%">어디에 두나</th></tr></thead>
+    <tbody>
+      <tr><td><strong>ID Token</strong></td><td>앱 (Client)</td><td>누구인지 — <code>sub</code>, <code>name</code>, <code>email</code></td><td>5분 ~ 1시간</td><td>로그인 처리에만 쓰고 세션에 보관</td></tr>
+      <tr><td><strong>Access Token</strong></td><td>API (Resource Server)</td><td>무엇을 할 수 있나 — <code>aud</code>, <code>scope</code>, <code>roles</code></td><td>5 ~ 15분</td><td><code>Authorization: Bearer</code> 헤더</td></tr>
+      <tr><td><strong>Refresh Token</strong></td><td>IdP만</td><td>새 토큰을 받을 권리</td><td>30분 ~ 30일</td><td>서버에만. 절대 브라우저·로그에 노출 금지</td></tr>
+    </tbody>
+  </table>
+  <div class="cols mt">
+    <div class="card warn">
+      <h3>바꿔 쓰지 말 것</h3>
+      <p><strong>Access Token은 API를 위한 것.</strong> 앱이 그 안을 해석해 화면 로직에 쓰면 IdP 설정이 바뀔 때 깨진다. 반대로 <strong>ID Token은 API에 보내지 않는다</strong> — API용 <code>aud</code>가 없다.</p>
+    </div>
+    <div class="card note">
+      <h3>수명이 짧은 이유</h3>
+      <p>JWT는 발급 후 취소가 어렵다. 탈취돼도 피해가 몇 분으로 끝나도록 Access Token은 짧게, 대신 Refresh Token으로 조용히 갱신한다.</p>
+    </div>
+  </div>
+  <aside class="notes">Keycloak 기본값은 access 5분, SSO 세션 idle 30분이다. "짧게"는 보안 설정이 아니라 설계 전제다. 갱신은 Spring의 OAuth2AuthorizedClientManager가 자동으로 해 준다(3회차).</aside>
+</section>
+
+<!-- 15. JWT 해부 -->
+<section class="slide">
+  <h2>JWT 해부 — header . payload . signature</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 310" role="img" aria-label="JWT는 점으로 구분된 세 부분이다. header에는 알고리즘과 키 ID, payload에는 발급자·대상·만료·역할 같은 claim, signature에는 IdP 개인키 서명이 들어 있고 API는 IdP 공개키로 서명을 검증한다">
+      <rect x="20" y="20" width="290" height="46" rx="8" class="svg-app"/>
+      <text x="165" y="38" text-anchor="middle" class="svg-text small b">Header</text>
+      <text x="165" y="57" text-anchor="middle" class="svg-text mono xs">eyJhbGciOiJSUzI1NiIsImtpZCI6ImFiYzEyMyJ9</text>
+      <text x="325" y="52" text-anchor="middle" class="svg-text lg b">.</text>
+      <rect x="340" y="20" width="450" height="46" rx="8" class="svg-token"/>
+      <text x="565" y="38" text-anchor="middle" class="svg-text small b token">Payload (claims)</text>
+      <text x="565" y="57" text-anchor="middle" class="svg-text mono xs">eyJpc3MiOiJodHRwczovL2tjLmNvbXBhbnkuY29tL3JlYWxtcy9jb21w…</text>
+      <text x="795" y="52" text-anchor="middle" class="svg-text lg b">.</text>
+      <rect x="810" y="20" width="306" height="46" rx="8" class="svg-idp"/>
+      <text x="963" y="38" text-anchor="middle" class="svg-text small b idp">Signature</text>
+      <text x="963" y="57" text-anchor="middle" class="svg-text mono xs">SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV…</text>
+
+      <path d="M165,66 L165,98" class="svg-line muted" marker-end="url(#arrow-muted)"/>
+      <path d="M560,66 L560,98" class="svg-line muted" marker-end="url(#arrow-muted)"/>
+      <path d="M963,66 L963,98" class="svg-line muted" marker-end="url(#arrow-muted)"/>
+      <text x="190" y="88" class="svg-text xs muted">Base64URL 디코딩</text>
+
+      <rect x="20" y="100" width="290" height="80" rx="8" class="svg-app"/>
+      <text x="32" y="122" class="svg-text mono xs">"alg": "RS256"</text>
+      <text x="150" y="122" class="svg-text xs muted">← 서명 알고리즘</text>
+      <text x="32" y="142" class="svg-text mono xs">"kid": "abc123"</text>
+      <text x="150" y="142" class="svg-text xs muted">← 어떤 공개키로 검증할지</text>
+      <text x="32" y="162" class="svg-text mono xs">"typ": "JWT"</text>
+
+      <rect x="340" y="100" width="450" height="160" rx="8" class="svg-token"/>
+      <text x="352" y="122" class="svg-text mono xs">"iss": "https://kc.company.com/realms/company"</text>
+      <text x="690" y="122" class="svg-text xs muted">← 발급자</text>
+      <text x="352" y="144" class="svg-text mono xs">"sub": "7c1e-…-kim"</text>
+      <text x="560" y="144" class="svg-text xs muted">← 누구 (사용자 고유 ID)</text>
+      <text x="352" y="166" class="svg-text mono xs">"aud": "report-api"</text>
+      <text x="560" y="166" class="svg-text xs muted">← 누구용 (대상 API)</text>
+      <text x="352" y="188" class="svg-text mono xs">"exp": 1760000600, "iat": 1760000300</text>
+      <text x="640" y="188" class="svg-text xs muted">← 만료 / 발급 시각</text>
+      <text x="352" y="210" class="svg-text mono xs">"azp": "agent-portal"</text>
+      <text x="560" y="210" class="svg-text xs muted">← 요청한 Client</text>
+      <text x="352" y="232" class="svg-text mono xs">"realm_access": {"roles": ["user","agent:report"]}</text>
+      <text x="700" y="232" class="svg-text xs muted">← 역할 (2회차)</text>
+      <text x="565" y="254" text-anchor="middle" class="svg-text xs muted">Base64URL 인코딩일 뿐, 암호화가 아니다 → 비밀을 넣지 말 것</text>
+
+      <rect x="810" y="100" width="306" height="80" rx="8" class="svg-idp"/>
+      <text x="822" y="122" class="svg-text mono xs">RSASHA256(</text>
+      <text x="822" y="142" class="svg-text mono xs">  base64(header) + "." + base64(payload),</text>
+      <text x="822" y="162" class="svg-text mono xs">  IdP 개인키 )</text>
+
+      <path d="M963,180 L963,212" class="svg-line dashed idp" marker-end="url(#arrow-idp)"/>
+      <rect x="840" y="214" width="246" height="46" rx="8" class="svg-idp"/>
+      <text x="963" y="242" text-anchor="middle" class="svg-text small b idp">API는 IdP 공개키로 검증</text>
+      <text x="963" y="290" text-anchor="middle" class="svg-text small b">→ 매 요청마다 IdP에 묻지 않는다</text>
+
+      <rect x="20" y="214" width="290" height="60" rx="8" class="svg-bad-box"/>
+      <text x="165" y="238" text-anchor="middle" class="svg-text small b bad">payload를 한 글자만 바꿔도</text>
+      <text x="165" y="258" text-anchor="middle" class="svg-text small bad">서명 불일치 → 거절</text>
+    </svg>
+    <figcaption>JWT(JSON Web Token)는 "서명된 JSON". 내용은 누구나 읽지만, 위조는 IdP 개인키 없이는 불가능하다.</figcaption>
+  </figure>
+  <aside class="notes">jwt.io 같은 외부 사이트에 운영 토큰을 붙여 넣지 말 것 — 실습 토큰만. 로컬에서는 payload를 cut -d. -f2 | base64 -d 로 볼 수 있다. 'aud'와 'azp'의 차이(누구용 vs 누가 요청했나)는 2회차에서 다시 다룬다.</aside>
+</section>
+
+<!-- 16. 서명 검증 흐름 -->
+<section class="slide">
+  <h2>API는 토큰을 어떻게 검증하나 — Discovery와 JWKS</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 360" role="img" aria-label="API가 시작할 때 IdP의 discovery 문서에서 jwks_uri를 얻어 공개키를 캐시하고, 요청마다 JWT의 kid로 키를 골라 서명·exp·iss·aud를 검사한다">
+      <rect x="20" y="20" width="230" height="140" rx="10" class="svg-app"/>
+      <text x="135" y="80" text-anchor="middle" class="svg-text b">업무 API</text>
+      <text x="135" y="102" text-anchor="middle" class="svg-text small muted">(Resource Server)</text>
+      <rect x="886" y="20" width="230" height="140" rx="10" class="svg-idp"/>
+      <text x="1001" y="80" text-anchor="middle" class="svg-text b">IdP (Keycloak)</text>
+      <text x="1001" y="102" text-anchor="middle" class="svg-text mono xs">/realms/company</text>
+
+      <path d="M250,48 L884,48" class="svg-line dashed idp" marker-end="url(#arrow-idp)"/>
+      <text x="568" y="41" text-anchor="middle" class="svg-text small idp">① GET /.well-known/openid-configuration — 시작 시 1회</text>
+      <path d="M886,80 L252,80" class="svg-line dashed idp" marker-end="url(#arrow-idp)"/>
+      <text x="568" y="73" text-anchor="middle" class="svg-text small idp">② issuer · jwks_uri · 지원 알고리즘</text>
+      <path d="M250,112 L884,112" class="svg-line dashed idp" marker-end="url(#arrow-idp)"/>
+      <text x="568" y="105" text-anchor="middle" class="svg-text small idp">③ GET jwks_uri (…/protocol/openid-connect/certs)</text>
+      <path d="M886,144 L252,144" class="svg-line dashed idp" marker-end="url(#arrow-idp)"/>
+      <text x="568" y="137" text-anchor="middle" class="svg-text small idp">④ 공개키 목록 (kid별) — 비밀 아님</text>
+
+      <path d="M135,160 L135,198" class="svg-line muted" marker-end="url(#arrow-muted)"/>
+      <text x="145" y="184" class="svg-text xs muted">저장</text>
+      <rect x="20" y="200" width="230" height="50" rx="8" class="svg-group"/>
+      <text x="135" y="230" text-anchor="middle" class="svg-text small b">공개키 캐시 (kid → 공개키)</text>
+
+      <path d="M250,225 L288,225" class="svg-line" marker-end="url(#arrow)"/>
+      <rect x="290" y="200" width="210" height="50" rx="8" class="svg-token"/>
+      <text x="395" y="220" text-anchor="middle" class="svg-text small b token">요청의 JWT</text>
+      <text x="395" y="240" text-anchor="middle" class="svg-text mono xs">header.kid = abc123</text>
+      <path d="M500,225 L558,225" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="529" y="216" text-anchor="middle" class="svg-text xs muted">검사</text>
+
+      <rect x="560" y="180" width="300" height="120" rx="8" class="svg-ok-box"/>
+      <text x="575" y="205" class="svg-text small">✓ <tspan class="b">서명</tspan>  kid의 공개키로 검증 (위조 차단)</text>
+      <text x="575" y="228" class="svg-text small">✓ <tspan class="b">exp</tspan>   아직 만료 전인가</text>
+      <text x="575" y="251" class="svg-text small">✓ <tspan class="b">iss</tspan>   우리 IdP가 발급했나</text>
+      <text x="575" y="274" class="svg-text small">✓ <tspan class="b">aud</tspan>   이 API용 토큰인가</text>
+
+      <path d="M860,240 L928,240" class="svg-line ok" marker-end="url(#arrow-ok)"/>
+      <text x="894" y="231" text-anchor="middle" class="svg-text xs ok">통과</text>
+      <rect x="930" y="215" width="186" height="50" rx="8" class="svg-ok-box"/>
+      <text x="1023" y="245" text-anchor="middle" class="svg-text small b ok">Controller 실행</text>
+      <text x="710" y="322" text-anchor="middle" class="svg-text small bad">하나라도 실패 → 401 Unauthorized</text>
+
+      <text x="20" y="350" class="svg-text small muted">키 롤오버: 모르는 kid가 오면 JWKS를 다시 조회한다 → IdP가 키를 바꿔도 API 재시작 불필요.</text>
+    </svg>
+    <figcaption>Spring은 <code>issuer-uri</code> 하나로 ①~④를 자동 처리한다. 개발자가 쓰는 것은 "무엇을 허용할지"뿐이다.</figcaption>
+  </figure>
+  <aside class="notes">공개키는 비밀이 아니다. 누구나 받아갈 수 있고, 그걸로 '검증'만 가능하지 '발급'은 못 한다. 이 비대칭 덕분에 API가 IdP와 비밀을 공유하지 않아도 된다. aud 검사는 Spring 기본값이 아니라는 점을 2회차에서 코드로 본다.</aside>
+</section>
+
+<!-- 17. 세션 vs 토큰 -->
+<section class="slide">
+  <h2>세션 쿠키 vs 토큰 — 둘 다 필요하다</h2>
+  <table>
+    <thead><tr><th style="width:16%">구분</th><th>세션 쿠키</th><th>토큰 (JWT)</th></tr></thead>
+    <tbody>
+      <tr><td>상태</td><td>서버가 보관 (stateful)</td><td>토큰 자체에 포함 (stateless)</td></tr>
+      <tr><td>검증</td><td>세션 저장소 조회</td><td>서명 검증 — 저장소 불필요</td></tr>
+      <tr><td>취소</td><td>즉시 (세션 삭제)</td><td>만료 전엔 어렵다 → 수명을 짧게</td></tr>
+      <tr><td>전달</td><td>브라우저가 자동 첨부</td><td>코드가 <code>Authorization</code> 헤더에 직접 첨부</td></tr>
+      <tr><td>주요 위험</td><td>CSRF (자동 첨부의 역효과)</td><td>XSS로 탈취 (JS가 읽을 수 있으면)</td></tr>
+      <tr><td>적합</td><td>브라우저 ↔ 서버</td><td>서버 ↔ 서버, API, 에이전트</td></tr>
+    </tbody>
+  </table>
+  <div class="card note mt big">
+    <p><strong>브라우저에는 세션 쿠키, 서버 뒤에서는 토큰.</strong> 이 둘을 한 서버에서 합친 것이 3회차의 BFF다. 오늘 만드는 <code>oauth2Login()</code> 앱이 이미 그 형태다 — 브라우저에는 세션 쿠키를 주고, 토큰은 세션 안에 보관한다.</p>
+  </div>
+</section>
+
+<!-- 18. 섹션 3 -->
+<section class="slide section">
+  <div class="num">03</div>
+  <h2>Spring으로 붙이기</h2>
+  <p>의존성 2개, 설정 10줄, 로그인 화면 0줄</p>
+</section>
+
+<!-- 19. 의존성 + yml -->
+<section class="slide">
+  <h2>의존성과 설정 — issuer-uri 하나면 나머지는 자동</h2>
+  <p class="code-title">build.gradle</p>
+<pre class="small"><code class="lang-bash">dependencies {
+  implementation 'org.springframework.boot:spring-boot-starter-web'
+  implementation 'org.springframework.boot:spring-boot-starter-security'
+  implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'   // "Client" 역할
+}</code></pre>
+  <div class="cols mt">
+    <div>
+      <p class="code-title">application.yml</p>
+<pre class="small"><code class="lang-yaml">spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          keycloak:                        # registrationId → URL에 쓰임
+            client-id: agent-portal
+            client-secret: ${KEYCLOAK_CLIENT_SECRET}
+            scope: openid, profile, email  # openid 가 있어야 OIDC
+        provider:
+          keycloak:
+            issuer-uri: https://kc.company.com/realms/company</code></pre>
+    </div>
+    <div class="stack">
+      <div class="card note">
+        <h3>oauth2-client가 맡는 일</h3>
+        <p>로그인 리다이렉트, code → 토큰 교환, 토큰 보관·갱신. 즉 OAuth 2.0의 "Client" 역할 전부. grant type 기본값은 <code>authorization_code</code>.</p>
+      </div>
+      <div class="card">
+        <h3>issuer-uri가 하는 일</h3>
+        <p><code>{issuer}/.well-known/openid-configuration</code>을 읽어 인증·토큰·JWKS 주소를 자동 설정한다. secret은 환경변수로 — git에 넣지 않는다.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">registrationId 'keycloak'은 임의의 이름이지만 로그인 진입점(/oauth2/authorization/keycloak)과 콜백(/login/oauth2/code/keycloak) URL에 그대로 쓰인다. secret은 환경변수로 — git에 넣지 않는다.</aside>
+</section>
+
+<!-- 20. SecurityConfig -->
+<section class="slide">
+  <h2>SecurityConfig — oauth2Login() 한 줄</h2>
+  <div class="cols w-3-2">
+    <div>
+      <p class="code-title">SecurityConfig.java</p>
+<pre><code class="lang-java">@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .authorizeHttpRequests(auth -&gt; auth
+                .requestMatchers("/", "/css/**", "/actuator/health").permitAll()
+                .anyRequest().authenticated())
+            .oauth2Login(Customizer.withDefaults());   // ← 이 한 줄
+        return http.build();
+    }
+}</code></pre>
+    </div>
+    <div class="stack">
+      <div class="card ok">
+        <h3>자동으로 생기는 것</h3>
+        <ul>
+          <li>로그인 진입점 <code>/oauth2/authorization/keycloak</code></li>
+          <li>콜백 <code>/login/oauth2/code/keycloak</code></li>
+          <li>code → 토큰 교환, PKCE, state 검증</li>
+          <li>세션 생성 + 세션 쿠키 발급</li>
+        </ul>
+      </div>
+      <div class="card warn">
+        <h3>Keycloak 쪽 설정 1개</h3>
+        <p>Client의 <em>Valid redirect URIs</em>에 <code>http://localhost:8080/login/oauth2/code/keycloak</code> 등록. 안 하면 "Invalid redirect_uri".</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">로그인 화면 HTML을 한 줄도 쓰지 않는다. 화면은 Keycloak이 제공하고, 디자인은 Keycloak 테마로 바꾼다. 미인증 요청이 오면 Spring이 302로 로그인 진입점에 보낸다 — API 요청에는 이게 문제가 되는데 3회차에서 다룬다.</aside>
+</section>
+
+<!-- 21. 로그인 후 사용자 정보 -->
+<section class="slide">
+  <h2>로그인 후 — 사용자 정보는 어디서 꺼내나</h2>
+  <div class="cols w-3-2 middle">
+    <div>
+      <p class="code-title">MeController.java</p>
+<pre><code class="lang-java">@RestController
+public class MeController {
+
+    @GetMapping("/api/me")
+    public Map&lt;String, Object&gt; me(@AuthenticationPrincipal OidcUser user) {
+        return Map.of(
+            "name",   user.getFullName(),
+            "email",  user.getEmail(),
+            "sub",    user.getSubject(),             // IdP가 준 고유 ID
+            "claims", user.getIdToken().getClaims()  // ID Token 전체
+        );
+    }
+}</code></pre>
+      <div class="card note mt">
+        <p><code>OidcUser</code>는 ID Token을 풀어 놓은 객체. Service 계층에서는 <code>SecurityContextHolder.getContext().getAuthentication()</code>으로 같은 정보에 접근한다.</p>
+      </div>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 440 350" role="img" aria-label="HTTP 요청이 Spring Security 필터 체인에서 세션을 확인받고 SecurityContext에 저장된 뒤 DispatcherServlet을 거쳐 Controller에 도달한다">
+        <rect x="70" y="10" width="300" height="44" rx="8" class="svg-user"/>
+        <text x="220" y="38" text-anchor="middle" class="svg-text b">HTTP 요청 (세션 쿠키)</text>
+        <path d="M220,54 L220,78" class="svg-line" marker-end="url(#arrow)"/>
+
+        <rect x="20" y="80" width="400" height="110" rx="10" class="svg-group"/>
+        <text x="220" y="102" text-anchor="middle" class="svg-text b">Spring Security Filter Chain</text>
+        <rect x="35" y="114" width="370" height="30" rx="6" class="svg-app"/>
+        <text x="220" y="134" text-anchor="middle" class="svg-text small">세션 확인 · 없으면 OAuth2 로그인으로 302</text>
+        <rect x="35" y="150" width="370" height="30" rx="6" class="svg-app"/>
+        <text x="220" y="170" text-anchor="middle" class="svg-text small">SecurityContext에 인증 정보 저장</text>
+        <text x="420" y="208" text-anchor="end" class="svg-text small bad">미인증 → 302 로그인 (API라면 401)</text>
+
+        <path d="M220,190 L220,218" class="svg-line" marker-end="url(#arrow)"/>
+        <rect x="70" y="220" width="300" height="44" rx="8" class="svg-app"/>
+        <text x="220" y="248" text-anchor="middle" class="svg-text b">DispatcherServlet</text>
+        <path d="M220,264 L220,292" class="svg-line" marker-end="url(#arrow)"/>
+        <rect x="70" y="294" width="300" height="44" rx="8" class="svg-app"/>
+        <text x="220" y="322" text-anchor="middle" class="svg-text small b">Controller · @AuthenticationPrincipal</text>
+      </svg>
+      <figcaption>인증은 Controller보다 앞, Filter 단계에서 끝난다. Controller는 "이미 검증된 값"만 꺼내 쓴다.</figcaption>
+    </figure>
+  </div>
+  <aside class="notes">Controller에서 request.getHeader("Authorization")을 직접 파싱하지 않는다. 검증은 필터에 맡기고 코드는 결과만 쓴다. 2회차의 Resource Server에서는 OidcUser 대신 Jwt 타입을 받는다.</aside>
+</section>
+
+<!-- 22. 로그아웃 -->
+<section class="slide">
+  <h2>로그아웃 — 세션이 두 개라는 것을 잊지 말 것</h2>
+  <div class="cols w-3-2">
+    <div>
+      <p class="code-title">SecurityConfig.java (logout 추가)</p>
+<pre class="small"><code class="lang-java">@Bean
+SecurityFilterChain filterChain(HttpSecurity http,
+        ClientRegistrationRepository clients) throws Exception {
+    var oidcLogout = new OidcClientInitiatedLogoutSuccessHandler(clients);
+    oidcLogout.setPostLogoutRedirectUri("{baseUrl}/");  // 로그아웃 후 돌아올 곳
+
+    http
+        .authorizeHttpRequests(a -&gt; a.anyRequest().authenticated())
+        .oauth2Login(Customizer.withDefaults())
+        .logout(l -&gt; l.logoutSuccessHandler(oidcLogout)); // ← IdP 세션까지 종료
+    return http.build();
+}</code></pre>
+    </div>
+    <div class="stack">
+      <div class="card bad">
+        <h3>❌ 앱 세션만 끊으면</h3>
+        <p>IdP 세션 쿠키가 남아 다음 접속에서 <strong>화면 없이 자동 재로그인</strong>. 사용자는 "로그아웃이 안 된다"고 느낀다.</p>
+      </div>
+      <div class="card ok">
+        <h3>✅ RP-Initiated Logout</h3>
+        <p>앱 세션 삭제 → IdP <code>end_session_endpoint</code>로 302 → IdP 세션 삭제 → 앱으로 복귀. 위 핸들러가 이 흐름을 만든다.</p>
+        <p class="small muted">참고: IdP가 먼저 끊은 세션을 앱에 알리는 Back-Channel Logout은 <code>oidcLogout()</code>으로 받는다.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">공용 PC 시나리오로 설명하면 잘 와닿는다. 앱 세션만 끊고 자리를 떠나면 다음 사람이 그 앱에 들어갈 때 IdP가 '아직 로그인 중'이라며 통과시킨다.</aside>
+</section>
+
+<!-- 23. 자주 하는 실수 -->
+<section class="slide">
+  <h2>자주 하는 실수</h2>
+  <div class="cols c-3">
+    <div class="card bad"><h3>❌ 서명 검증 없이 payload만 디코딩</h3><p>Base64는 암호화가 아니다. 누구나 원하는 내용의 "토큰"을 만들 수 있다. 서명 검증이 전부다.</p></div>
+    <div class="card bad"><h3>❌ exp · iss 미확인</h3><p>만료를 안 보면 탈취된 토큰이 영원히 유효. 발급자를 안 보면 다른 IdP의 토큰이 통과.</p></div>
+    <div class="card bad"><h3>❌ 토큰을 URL 쿼리에</h3><p>히스토리·접근 로그·Referer에 남는다. 토큰은 항상 <code>Authorization</code> 헤더로.</p></div>
+  </div>
+  <div class="cols c-3 mt">
+    <div class="card bad"><h3>❌ aud 미검증</h3><p>같은 IdP가 발급한 <em>다른 서비스용</em> 토큰이 통과한다. Spring 기본 설정은 aud를 검사하지 않는다 → 2회차 코드.</p></div>
+    <div class="card bad"><h3>❌ HTTP 평문 · 로그 출력</h3><p>Bearer 토큰은 가로채면 그대로 재사용된다. TLS 필수. 로그에 헤더를 통째로 찍지 말 것.</p></div>
+    <div class="card bad"><h3>❌ ID Token을 API 인증에 사용</h3><p>ID Token은 앱이 읽는 것. API에는 <code>aud</code>가 맞는 Access Token만 보낸다.</p></div>
+  </div>
+  <aside class="notes">이 중 'aud 미검증'이 실무에서 가장 흔하다. issuer-uri만 설정하면 같은 realm의 모든 토큰이 통과하기 때문이다. 2회차에서 JwtDecoder에 audience validator를 붙이는 코드를 본다.</aside>
+</section>
+
+<!-- 24. 요약 + 실습 + 다음 회차 -->
+<section class="slide">
+  <h2>요약 · 실습 · 다음 회차</h2>
+  <div class="cols w-1-2">
+    <ul class="checklist">
+      <li>인증은 "누구냐", 인가는 "되냐" — 401 / 403</li>
+      <li>SSO = 로그인은 IdP 한 곳, 앱은 토큰만 검증</li>
+      <li>"한 번 로그인"은 IdP 세션 쿠키가 만든다</li>
+      <li>code flow: 토큰은 백 채널로만, PKCE는 기본으로</li>
+      <li>ID Token은 앱이, Access Token은 API가 읽는다</li>
+      <li>JWT는 서명된 JSON — 공개키로 검증, 수명은 짧게</li>
+      <li>Spring: 의존성 2개 + issuer-uri + <code>oauth2Login()</code></li>
+    </ul>
+    <div class="stack">
+      <div class="card">
+        <h3>실습 과제 — 다음 시간 전까지</h3>
+        <p class="small">① 로컬에 Keycloak을 띄우고 ② realm 하나, 사용자 하나를 만든 뒤 ③ 오늘의 설정으로 로그인해 <code>/api/me</code>를 확인한다.</p>
+<pre class="small"><code class="lang-bash">docker run --name kc -p 8180:8080 \
+  -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+  -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+  quay.io/keycloak/keycloak:26.4 start-dev
+# 콘솔: http://localhost:8180 (실습 전용, 운영은 start-dev 금지)</code></pre>
+      </div>
+      <div class="card note">
+        <h3>다음 회차 — Keycloak</h3>
+        <p>그 IdP가 Keycloak이다. Realm · Client · Role이 토큰의 <em>어떤 값</em>이 되는지, Spring Resource Server가 그 값을 어떻게 권한으로 바꾸는지.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+<script src="assets/slides.js"></script>
+</body>
+</html>

@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keycloak 에이전트 권한 구조</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --fg: #1f2328; --muted: #59636e; --card: #ffffff; --border: #d8dde3;
+    --kc: #2563eb; --kc-fill: #dbeafe;
+    --tok: #b45309; --tok-fill: #fef3c7;
+    --bad: #dc2626; --bad-fill: #fee2e2;
+    --ok: #15803d;
+    --box-fill: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117; --fg: #e6edf3; --muted: #9da7b3; --card: #161b22; --border: #30363d;
+      --kc: #60a5fa; --kc-fill: #1e3a5f; --tok: #fbbf24; --tok-fill: #3b2f0b;
+      --bad: #f87171; --bad-fill: #4a1d1d; --ok: #4ade80; --box-fill: #161b22;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117; --fg: #e6edf3; --muted: #9da7b3; --card: #161b22; --border: #30363d;
+    --kc: #60a5fa; --kc-fill: #1e3a5f; --tok: #fbbf24; --tok-fill: #3b2f0b;
+    --bad: #f87171; --bad-fill: #4a1d1d; --ok: #4ade80; --box-fill: #161b22;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-family: "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif; line-height: 1.6; font-size: 16px; }
+  main { max-width: 1040px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 28px; margin: 0 0 8px; }
+  .sub { color: var(--muted); margin: 0 0 32px; }
+  h2 { font-size: 20px; margin: 48px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  h2 .n { color: var(--kc); margin-right: 8px; }
+  p { margin: 10px 0; }
+  figure { margin: 16px 0; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+  figure svg { display: block; max-width: 100%; height: auto; font-family: "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif; }
+  figcaption { color: var(--muted); font-size: 14px; margin-top: 12px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px 20px; margin: 12px 0; }
+  .summary { border-left: 4px solid var(--kc); }
+  code { font-family: "Cascadia Mono", Consolas, monospace; background: var(--bg); border: 1px solid var(--border); padding: 1px 6px; border-radius: 4px; font-size: 0.92em; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; vertical-align: top; }
+  th { background: var(--card); }
+  .legend { display: flex; gap: 20px; flex-wrap: wrap; font-size: 14px; color: var(--muted); margin: 8px 0 0; }
+  .legend span::before { content: ""; display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; border: 2px solid; }
+  .legend .l-kc::before { border-color: var(--kc); background: var(--kc-fill); }
+  .legend .l-tok::before { border-color: var(--tok); background: var(--tok-fill); }
+  .legend .l-box::before { border-color: currentColor; background: var(--box-fill); }
+  .toggle { position: fixed; top: 12px; right: 16px; font-size: 13px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; color: var(--fg); }
+
+  /* SVG classes */
+  svg .box { fill: var(--box-fill); stroke: currentColor; stroke-width: 1.5; }
+  svg .kc { fill: var(--kc-fill); stroke: var(--kc); stroke-width: 2; }
+  svg .tok { fill: var(--tok-fill); stroke: var(--tok); stroke-width: 1.5; }
+  svg .note { fill: var(--card); stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 3; }
+  svg .bad { fill: var(--bad-fill); stroke: var(--bad); stroke-width: 1.5; }
+  svg .line { stroke: currentColor; stroke-width: 1.5; fill: none; }
+  svg .dash { stroke: currentColor; stroke-width: 1.5; fill: none; stroke-dasharray: 6 4; }
+  svg .life { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 4; }
+  svg .badline { stroke: var(--bad); stroke-width: 2; fill: none; stroke-dasharray: 7 4; }
+  svg text { fill: currentColor; font-size: 13px; }
+  svg .t-sm { font-size: 11.5px; fill: var(--muted); }
+  svg .t-b { font-weight: 700; }
+  svg .t-kc { fill: var(--kc); font-weight: 700; }
+  svg .t-tok { fill: var(--tok); }
+  svg .t-bad { fill: var(--bad); font-weight: 700; }
+  svg .t-ok { fill: var(--ok); font-weight: 700; }
+  svg .mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; }
+  svg .num { fill: var(--kc); font-weight: 700; font-size: 13px; }
+  svg .arrowhead { fill: currentColor; }
+  svg .arrowhead-bad { fill: var(--bad); }
+</style>
+</head>
+<body>
+<button class="toggle" onclick="toggleTheme()">테마 전환</button>
+<main>
+  <h1>Keycloak 기반 AI 에이전트 권한 구조</h1>
+  <p class="sub">Role이 어디에 정의되고, 어떻게 토큰에 담겨, 어떤 경로로 API까지 전달되는지 다섯 장의 그림으로 설명합니다.</p>
+  <div class="legend">
+    <span class="l-kc">Keycloak (인증·인가 서버)</span>
+    <span class="l-tok">토큰(JWT)과 그 내용</span>
+    <span class="l-box">애플리케이션·서비스</span>
+  </div>
+
+  <!-- ===================== 그림 1 ===================== -->
+  <h2><span class="n">그림 1</span>전체 구성: 누가 어디에 있는가</h2>
+  <figure>
+    <svg viewBox="0 0 960 380" role="img" aria-label="사용자, AI 에이전트, Keycloak, 업무 API 네 요소의 배치. 에이전트는 Keycloak에서 토큰을 받아 업무 API를 호출하고, 업무 API는 Keycloak에서 공개키만 한 번 가져온다. 업무 데이터는 Keycloak을 거치지 않는다.">
+      <defs>
+        <marker id="ah1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
+      </defs>
+      <!-- 사용자 -->
+      <rect x="40" y="50" width="170" height="64" rx="8" class="box"/>
+      <text x="125" y="78" text-anchor="middle" class="t-b">사용자</text>
+      <text x="125" y="98" text-anchor="middle" class="t-sm">브라우저 / 채팅 UI</text>
+
+      <!-- Keycloak -->
+      <rect x="370" y="20" width="240" height="210" rx="10" class="kc"/>
+      <text x="490" y="46" text-anchor="middle" class="t-kc">Keycloak</text>
+      <text x="490" y="64" text-anchor="middle" class="t-sm">인증·인가 서버 (토큰 발급만 담당)</text>
+      <line x1="385" y1="76" x2="595" y2="76" class="line" style="stroke:var(--kc);stroke-width:1"/>
+      <text x="390" y="98" class="mono">realm: myrealm</text>
+      <text x="402" y="118" class="mono">├ users / roles   ← Role 정의</text>
+      <text x="402" y="138" class="mono">├ clients</text>
+      <text x="414" y="156" class="mono">│  ├ web-app</text>
+      <text x="414" y="174" class="mono">│  ├ report-agent  ← 에이전트</text>
+      <text x="414" y="192" class="mono">│  └ report-api    ← 업무 API</text>
+      <text x="402" y="212" class="mono">└ 공개키 (JWKS)</text>
+
+      <!-- 업무 API -->
+      <rect x="750" y="50" width="170" height="64" rx="8" class="box"/>
+      <text x="835" y="78" text-anchor="middle" class="t-b">업무 API 서버</text>
+      <text x="835" y="98" text-anchor="middle" class="t-sm mono">report-api</text>
+
+      <!-- 에이전트 -->
+      <rect x="370" y="290" width="240" height="64" rx="8" class="box"/>
+      <text x="490" y="316" text-anchor="middle" class="t-b">AI 에이전트</text>
+      <text x="490" y="336" text-anchor="middle" class="t-sm mono">client: report-agent</text>
+
+      <!-- 사용자 → 에이전트 -->
+      <polyline points="125,114 125,322 366,322" class="line" marker-end="url(#ah1)"/>
+      <text x="135" y="300" class="t-sm">"보고서 써줘"</text>
+
+      <!-- 에이전트 ↔ Keycloak -->
+      <line x1="470" y1="290" x2="470" y2="234" class="line" marker-end="url(#ah1)"/>
+      <text x="462" y="266" text-anchor="end" class="t-sm">① 토큰 요청</text>
+      <line x1="510" y1="230" x2="510" y2="286" class="line" marker-end="url(#ah1)"/>
+      <text x="518" y="266" class="t-sm t-tok">② JWT 발급 (role 포함)</text>
+
+      <!-- 에이전트 → API -->
+      <polyline points="610,322 835,322 835,118" class="line" marker-end="url(#ah1)"/>
+      <text x="845" y="230" class="t-sm t-tok">③ Authorization:</text>
+      <text x="845" y="246" class="t-sm t-tok">   Bearer &lt;JWT&gt;</text>
+      <text x="845" y="262" class="t-sm">   로 업무 호출</text>
+
+      <!-- API → Keycloak 공개키 -->
+      <line x1="750" y1="82" x2="614" y2="82" class="dash" marker-end="url(#ah1)"/>
+      <text x="682" y="72" text-anchor="middle" class="t-sm">공개키 조회 (최초 1회)</text>
+
+      <!-- 주석 -->
+      <text x="40" y="365" class="t-sm">※ 업무 데이터(보고서 내용 등)는 Keycloak을 거치지 않습니다. Keycloak은 "이 호출자가 누구이고 무슨 role인지" 적힌 토큰만 찍어 줍니다.</text>
+    </svg>
+    <figcaption>Keycloak은 가운데서 토큰만 발급합니다. Role은 Keycloak 안의 DB에 정의되어 있고, ②에서 토큰에 복사되어 ③의 헤더에 실려 API까지 갑니다.</figcaption>
+  </figure>
+
+  <!-- ===================== 그림 2 ===================== -->
+  <h2><span class="n">그림 2</span>가장 단순한 흐름: 에이전트가 서비스 계정으로 동작 (모델 A)</h2>
+  <figure>
+    <svg viewBox="0 0 960 540" role="img" aria-label="에이전트, Keycloak, 업무 API 세 참여자의 순서도. 에이전트가 client_id와 secret으로 토큰을 요청하면 Keycloak이 DB의 role을 담아 서명된 JWT를 발급한다. 에이전트는 그 JWT를 Authorization 헤더에 넣어 API를 호출하고, API는 공개키로 서명을 검증한 뒤 토큰 안의 role을 읽어 허용한다.">
+      <defs>
+        <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
+      </defs>
+      <!-- 참여자 -->
+      <rect x="60" y="16" width="160" height="40" rx="8" class="box"/><text x="140" y="42" text-anchor="middle" class="t-b">AI 에이전트</text>
+      <rect x="400" y="16" width="160" height="40" rx="8" class="kc"/><text x="480" y="42" text-anchor="middle" class="t-kc">Keycloak</text>
+      <rect x="740" y="16" width="160" height="40" rx="8" class="box"/><text x="820" y="42" text-anchor="middle" class="t-b">업무 API</text>
+      <line x1="140" y1="56" x2="140" y2="525" class="life"/>
+      <line x1="480" y1="56" x2="480" y2="525" class="life"/>
+      <line x1="820" y1="56" x2="820" y2="525" class="life"/>
+
+      <!-- ① -->
+      <line x1="140" y1="100" x2="476" y2="100" class="line" marker-end="url(#ah2)"/>
+      <text x="150" y="90" class="num">①</text>
+      <text x="170" y="90" class="mono">POST /realms/myrealm/protocol/openid-connect/token</text>
+      <text x="170" y="116" class="mono t-sm">grant_type=client_credentials  client_id=report-agent  client_secret=****</text>
+
+      <!-- KC 내부 조회 -->
+      <rect x="492" y="130" width="250" height="48" rx="6" class="note"/>
+      <text x="502" y="149" class="t-sm">DB 조회: report-agent 서비스계정의 role</text>
+      <text x="502" y="167" class="mono t-sm">→ [agent, report-writer]</text>
+
+      <!-- ② -->
+      <line x1="480" y1="200" x2="144" y2="200" class="line" marker-end="url(#ah2)"/>
+      <text x="150" y="190" class="num">②</text>
+      <text x="170" y="190" class="t-tok">서명된 JWT 발급</text>
+
+      <!-- 토큰 내용 -->
+      <rect x="170" y="214" width="290" height="98" rx="6" class="tok"/>
+      <text x="182" y="233" class="mono">{ "azp": "report-agent",</text>
+      <text x="182" y="251" class="mono">  "aud": "report-api",</text>
+      <text x="182" y="269" class="mono">  "realm_access": { "roles":</text>
+      <text x="182" y="287" class="mono">     ["agent", "report-writer"] },</text>
+      <text x="182" y="305" class="mono">  "exp": 5분 뒤 }</text>
+      <text x="470" y="268" class="t-sm t-tok">← Role은</text>
+      <text x="470" y="284" class="t-sm t-tok">   여기 들어 있음</text>
+
+      <!-- ③ -->
+      <line x1="140" y1="340" x2="816" y2="340" class="line" marker-end="url(#ah2)"/>
+      <text x="150" y="330" class="num">③</text>
+      <text x="170" y="330" class="mono">POST /reports</text>
+      <text x="300" y="330" class="mono t-tok">Authorization: Bearer &lt;JWT&gt;</text>
+      <text x="560" y="330" class="mono t-sm">body: { "title": "..." }  ← 본문에는 role 없음</text>
+
+      <!-- 공개키 -->
+      <line x1="820" y1="372" x2="484" y2="372" class="dash" marker-end="url(#ah2)"/>
+      <text x="650" y="364" text-anchor="middle" class="t-sm">GET /certs  (공개키, 최초 1회만 받아 캐시)</text>
+
+      <!-- ④ 검증 -->
+      <rect x="640" y="392" width="300" height="92" rx="6" class="note"/>
+      <text x="652" y="411" class="num">④</text>
+      <text x="672" y="411" class="t-b">API가 스스로 검증 (Keycloak에 안 물음)</text>
+      <text x="672" y="430" class="t-sm">· 서명이 Keycloak 공개키와 맞는가</text>
+      <text x="672" y="446" class="t-sm">· aud == report-api 인가, exp 안 지났는가</text>
+      <text x="672" y="462" class="t-sm">· realm_access.roles 에 필요한 role이 있는가</text>
+      <text x="672" y="478" class="t-ok">→ 통과</text>
+
+      <!-- ⑤ -->
+      <line x1="820" y1="510" x2="144" y2="510" class="line" marker-end="url(#ah2)"/>
+      <text x="150" y="500" class="num">⑤</text>
+      <text x="170" y="500" class="mono">200 OK</text>
+    </svg>
+    <figcaption>핵심은 ④입니다. 업무 API는 Keycloak에 매번 묻지 않고, 서명만 검증한 뒤 토큰 안의 role을 믿습니다. "Role이 요청에 섞여 온다"는 말은 ③의 Authorization 헤더를 뜻합니다.</figcaption>
+  </figure>
+
+  <!-- ===================== 그림 3 ===================== -->
+  <h2><span class="n">그림 3</span>사용자를 대신하는 흐름: 토큰 교환 (모델 C, RFC 8693)</h2>
+  <figure>
+    <svg viewBox="0 0 1000 660" role="img" aria-label="사용자, 웹앱, 에이전트, Keycloak, 업무 API 다섯 참여자의 순서도. 사용자가 로그인해 받은 토큰을 에이전트가 Keycloak에 제시하고, 에이전트 자신을 행위자로, 특정 API와 scope로 한정한 새 토큰으로 교환받아 API를 호출한다. 새 토큰에는 사용자와 행위자가 함께 기록된다.">
+      <defs>
+        <marker id="ah3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
+      </defs>
+      <!-- 참여자 -->
+      <rect x="30" y="16" width="120" height="40" rx="8" class="box"/><text x="90" y="42" text-anchor="middle" class="t-b">사용자</text>
+      <rect x="230" y="16" width="120" height="40" rx="8" class="box"/><text x="290" y="42" text-anchor="middle" class="t-b">웹앱</text>
+      <rect x="430" y="16" width="120" height="40" rx="8" class="box"/><text x="490" y="42" text-anchor="middle" class="t-b">AI 에이전트</text>
+      <rect x="630" y="16" width="120" height="40" rx="8" class="kc"/><text x="690" y="42" text-anchor="middle" class="t-kc">Keycloak</text>
+      <rect x="830" y="16" width="120" height="40" rx="8" class="box"/><text x="890" y="42" text-anchor="middle" class="t-b">업무 API</text>
+      <line x1="90" y1="56" x2="90" y2="645" class="life"/>
+      <line x1="290" y1="56" x2="290" y2="645" class="life"/>
+      <line x1="490" y1="56" x2="490" y2="645" class="life"/>
+      <line x1="690" y1="56" x2="690" y2="645" class="life"/>
+      <line x1="890" y1="56" x2="890" y2="645" class="life"/>
+
+      <!-- 로그인 -->
+      <line x1="90" y1="96" x2="286" y2="96" class="line" marker-end="url(#ah3)"/>
+      <text x="190" y="88" text-anchor="middle" class="t-sm">로그인</text>
+      <!-- ① -->
+      <line x1="290" y1="128" x2="686" y2="128" class="line" marker-end="url(#ah3)"/>
+      <text x="300" y="120" class="num">①</text>
+      <text x="320" y="120" class="t-sm">사용자 토큰 요청 (OIDC 로그인 흐름)</text>
+      <line x1="690" y1="160" x2="294" y2="160" class="line" marker-end="url(#ah3)"/>
+      <text x="300" y="178" class="mono t-tok">사용자 JWT  { sub: "kim", roles: ["manager"] }</text>
+
+      <!-- 보고서 써줘 -->
+      <line x1="90" y1="210" x2="286" y2="210" class="line" marker-end="url(#ah3)"/>
+      <text x="190" y="202" text-anchor="middle" class="t-sm">"보고서 써줘"</text>
+      <!-- ② -->
+      <line x1="290" y1="240" x2="486" y2="240" class="line" marker-end="url(#ah3)"/>
+      <text x="300" y="232" class="num">②</text>
+      <text x="320" y="232" class="t-sm">사용자 JWT 전달</text>
+
+      <!-- ③ -->
+      <line x1="490" y1="280" x2="686" y2="280" class="line" marker-end="url(#ah3)"/>
+      <text x="500" y="272" class="num">③</text>
+      <text x="520" y="272" class="t-b">토큰 교환 요청</text>
+      <rect x="500" y="292" width="300" height="84" rx="6" class="note"/>
+      <text x="512" y="310" class="mono t-sm">grant_type = token-exchange</text>
+      <text x="512" y="326" class="mono t-sm">subject_token = &lt;사용자 JWT&gt;</text>
+      <text x="512" y="342" class="mono t-sm">client_id = report-agent</text>
+      <text x="512" y="358" class="mono t-sm">audience = report-api   scope = report:write</text>
+
+      <!-- KC 정책 확인 -->
+      <rect x="700" y="392" width="240" height="46" rx="6" class="note"/>
+      <text x="712" y="410" class="t-sm">정책 확인: report-agent 가 kim 을 대신해</text>
+      <text x="712" y="427" class="t-sm">report-api 용 토큰으로 교환해도 되는가?</text>
+
+      <!-- ④ -->
+      <line x1="690" y1="462" x2="494" y2="462" class="line" marker-end="url(#ah3)"/>
+      <text x="500" y="454" class="num">④</text>
+      <text x="520" y="454" class="t-tok">새 JWT (권한 좁힘 + 행위자 기록)</text>
+      <rect x="500" y="474" width="300" height="100" rx="6" class="tok"/>
+      <text x="512" y="493" class="mono">{ "sub": "kim",</text>
+      <text x="700" y="493" class="t-sm t-tok">← 누구를 위해</text>
+      <text x="512" y="512" class="mono">  "act": { "azp": "report-agent" },</text>
+      <text x="750" y="512" class="t-sm t-tok">← 누가</text>
+      <text x="512" y="531" class="mono">  "aud": "report-api",</text>
+      <text x="700" y="531" class="t-sm t-tok">← 어디에만</text>
+      <text x="512" y="550" class="mono">  "scope": "report:write" }</text>
+      <text x="700" y="550" class="t-sm t-tok">← 무엇까지</text>
+
+      <!-- ⑤ -->
+      <line x1="490" y1="600" x2="886" y2="600" class="line" marker-end="url(#ah3)"/>
+      <text x="500" y="592" class="num">⑤</text>
+      <text x="520" y="592" class="mono">POST /reports</text>
+      <text x="640" y="592" class="mono t-tok">Authorization: Bearer &lt;새 JWT&gt;</text>
+      <rect x="640" y="612" width="300" height="30" rx="6" class="note"/>
+      <text x="652" y="632" class="t-sm">감사 로그: "kim 을 대신한 report-agent 가 report:write"</text>
+    </svg>
+    <figcaption>모델 A와 다른 점은 ④의 토큰에 사용자(sub)와 행위자(act)가 함께 들어간다는 것입니다. 에이전트가 사용자 토큰을 저장해 재사용하는 대신, 매번 좁혀진 토큰으로 바꿔 받습니다.</figcaption>
+  </figure>
+
+  <!-- ===================== 그림 4 ===================== -->
+  <h2><span class="n">그림 4</span>멀티 에이전트로 확장: 권한을 좁혀서 내려보내기</h2>
+  <figure>
+    <svg viewBox="0 0 960 470" role="img" aria-label="오케스트레이터 에이전트가 넓은 사용자 토큰을 받아 Keycloak에서 세 번 토큰 교환을 하고, 조사·자료·보고서 서브에이전트 각각에 다른 scope와 audience를 가진 토큰을 내려보낸다. 각 서브에이전트는 자기 API만 호출할 수 있고, 조사 에이전트가 보고서 API를 부르면 audience 불일치로 거절된다.">
+      <defs>
+        <marker id="ah4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
+        <marker id="ah4b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead-bad"/></marker>
+      </defs>
+      <!-- 사용자 토큰 -->
+      <rect x="320" y="16" width="320" height="38" rx="19" class="tok"/>
+      <text x="480" y="40" text-anchor="middle" class="mono">사용자 토큰  roles=["manager"]  (권한 넓음)</text>
+      <line x1="480" y1="54" x2="480" y2="88" class="line" marker-end="url(#ah4)"/>
+
+      <!-- 오케스트레이터 -->
+      <rect x="370" y="92" width="220" height="56" rx="8" class="box"/>
+      <text x="480" y="116" text-anchor="middle" class="t-b">오케스트레이터 에이전트</text>
+      <text x="480" y="136" text-anchor="middle" class="t-sm">작업을 셋으로 나눔</text>
+
+      <!-- Keycloak -->
+      <rect x="740" y="92" width="180" height="56" rx="8" class="kc"/>
+      <text x="830" y="116" text-anchor="middle" class="t-kc">Keycloak</text>
+      <text x="830" y="136" text-anchor="middle" class="t-sm">토큰 교환 ×3</text>
+      <line x1="590" y1="112" x2="736" y2="112" class="line" marker-end="url(#ah4)"/>
+      <line x1="740" y1="130" x2="594" y2="130" class="line" marker-end="url(#ah4)"/>
+      <text x="665" y="104" text-anchor="middle" class="t-sm">사용자 토큰 제시</text>
+      <text x="665" y="146" text-anchor="middle" class="t-sm t-tok">좁힌 토큰 3개</text>
+
+      <!-- 분기 선 -->
+      <line x1="480" y1="148" x2="480" y2="176" class="line"/>
+      <line x1="170" y1="176" x2="790" y2="176" class="line"/>
+      <line x1="170" y1="176" x2="170" y2="236" class="line" marker-end="url(#ah4)"/>
+      <line x1="480" y1="176" x2="480" y2="236" class="line" marker-end="url(#ah4)"/>
+      <line x1="790" y1="176" x2="790" y2="236" class="line" marker-end="url(#ah4)"/>
+
+      <!-- 토큰 라벨 -->
+      <rect x="60" y="184" width="220" height="40" rx="6" class="tok"/>
+      <text x="170" y="200" text-anchor="middle" class="mono t-sm">scope = web:read</text>
+      <text x="170" y="216" text-anchor="middle" class="mono t-sm">aud = search-api</text>
+      <rect x="370" y="184" width="220" height="40" rx="6" class="tok"/>
+      <text x="480" y="200" text-anchor="middle" class="mono t-sm">scope = file:read</text>
+      <text x="480" y="216" text-anchor="middle" class="mono t-sm">aud = storage-api</text>
+      <rect x="680" y="184" width="220" height="40" rx="6" class="tok"/>
+      <text x="790" y="200" text-anchor="middle" class="mono t-sm">scope = report:write</text>
+      <text x="790" y="216" text-anchor="middle" class="mono t-sm">aud = report-api</text>
+
+      <!-- 서브에이전트 -->
+      <rect x="70" y="240" width="200" height="50" rx="8" class="box"/>
+      <text x="170" y="270" text-anchor="middle" class="t-b">조사 서브에이전트</text>
+      <rect x="380" y="240" width="200" height="50" rx="8" class="box"/>
+      <text x="480" y="270" text-anchor="middle" class="t-b">자료 서브에이전트</text>
+      <rect x="690" y="240" width="200" height="50" rx="8" class="box"/>
+      <text x="790" y="270" text-anchor="middle" class="t-b">보고서 서브에이전트</text>
+
+      <!-- 정상 호출 -->
+      <line x1="170" y1="290" x2="170" y2="366" class="line" marker-end="url(#ah4)"/>
+      <line x1="480" y1="290" x2="480" y2="366" class="line" marker-end="url(#ah4)"/>
+      <line x1="790" y1="290" x2="790" y2="366" class="line" marker-end="url(#ah4)"/>
+      <text x="180" y="332" class="t-ok">허용</text>
+      <text x="490" y="332" class="t-ok">허용</text>
+      <text x="800" y="332" class="t-ok">허용</text>
+
+      <!-- 잘못된 호출 -->
+      <line x1="260" y1="290" x2="700" y2="366" class="badline" marker-end="url(#ah4b)"/>
+      <rect x="400" y="316" width="190" height="36" rx="6" class="bad"/>
+      <text x="495" y="332" text-anchor="middle" class="t-bad">aud 불일치 → 거절</text>
+      <text x="495" y="346" text-anchor="middle" class="t-sm">search-api 용 토큰으로 report-api 호출</text>
+
+      <!-- API -->
+      <rect x="70" y="370" width="200" height="50" rx="8" class="box"/>
+      <text x="170" y="400" text-anchor="middle" class="mono">search-api</text>
+      <rect x="380" y="370" width="200" height="50" rx="8" class="box"/>
+      <text x="480" y="400" text-anchor="middle" class="mono">storage-api</text>
+      <rect x="690" y="370" width="200" height="50" rx="8" class="box"/>
+      <text x="790" y="400" text-anchor="middle" class="mono">report-api</text>
+
+      <text x="60" y="455" class="t-sm">※ 각 API는 자기 이름이 aud 에 적힌 토큰만 받습니다. 프롬프트가 아니라 토큰이 권한 경계가 됩니다.</text>
+    </svg>
+    <figcaption>서브에이전트마다 다른 aud와 scope를 가진 토큰을 따로 받습니다. 조사 에이전트가 실수로 report-api를 호출하면 aud가 맞지 않아 거절됩니다.</figcaption>
+  </figure>
+
+  <!-- ===================== 그림 5 ===================== -->
+  <h2><span class="n">그림 5</span>Role이 토큰에 들어가는 경로 (Keycloak 내부)</h2>
+  <figure>
+    <svg viewBox="0 0 960 300" role="img" aria-label="관리 콘솔이나 realm JSON으로 Keycloak DB에 role을 정의하고 사용자·서비스 계정에 매핑한다. 토큰을 발급할 때 Protocol Mapper가 DB의 role 목록을 JWT의 realm_access.roles 클레임으로 복사한다.">
+      <defs>
+        <marker id="ah5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
+      </defs>
+      <!-- 관리 -->
+      <rect x="30" y="110" width="170" height="80" rx="8" class="box"/>
+      <text x="115" y="140" text-anchor="middle" class="t-b">관리자 설정</text>
+      <text x="115" y="160" text-anchor="middle" class="t-sm">관리 콘솔 / realm.json</text>
+      <text x="115" y="176" text-anchor="middle" class="t-sm">/ Admin REST API</text>
+      <line x1="200" y1="150" x2="256" y2="150" class="line" marker-end="url(#ah5)"/>
+      <text x="228" y="140" text-anchor="middle" class="t-sm">정의·매핑</text>
+
+      <!-- Keycloak DB -->
+      <rect x="260" y="30" width="340" height="240" rx="10" class="kc"/>
+      <text x="430" y="56" text-anchor="middle" class="t-kc">Keycloak DB</text>
+      <rect x="276" y="70" width="308" height="52" rx="6" class="box"/>
+      <text x="286" y="88" class="t-b">Role 정의</text>
+      <text x="286" y="108" class="mono t-sm">agent, report-writer, manager</text>
+      <rect x="276" y="130" width="308" height="64" rx="6" class="box"/>
+      <text x="286" y="148" class="t-b">매핑</text>
+      <text x="286" y="166" class="mono t-sm">report-agent(서비스계정) → agent, report-writer</text>
+      <text x="286" y="184" class="mono t-sm">kim(사용자)              → manager</text>
+      <rect x="276" y="202" width="308" height="56" rx="6" class="box"/>
+      <text x="286" y="220" class="t-b">Client Scope → Protocol Mapper</text>
+      <text x="286" y="238" class="t-sm">"realm roles 를 realm_access.roles 클레임에 넣어라"</text>
+      <text x="286" y="252" class="t-sm">"client roles 를 resource_access.X.roles 에 넣어라"</text>
+
+      <!-- 발급 -->
+      <line x1="600" y1="150" x2="656" y2="150" class="line" marker-end="url(#ah5)"/>
+      <text x="628" y="128" text-anchor="middle" class="t-sm">토큰 발급 시</text>
+      <text x="628" y="142" text-anchor="middle" class="t-sm">매퍼가 복사</text>
+
+      <!-- JWT -->
+      <rect x="660" y="70" width="270" height="160" rx="8" class="tok"/>
+      <text x="795" y="94" text-anchor="middle" class="t-tok t-b">발급된 JWT payload</text>
+      <text x="674" y="118" class="mono">{</text>
+      <text x="674" y="136" class="mono">  "sub": "3f2a...",</text>
+      <text x="674" y="154" class="mono">  "azp": "report-agent",</text>
+      <text x="674" y="172" class="mono">  "realm_access": {</text>
+      <text x="674" y="190" class="mono">    "roles": ["agent",</text>
+      <text x="674" y="208" class="mono">              "report-writer"] }</text>
+      <text x="674" y="226" class="mono">}</text>
+    </svg>
+    <figcaption>Role은 Keycloak DB에 살고, 토큰 발급 순간 Protocol Mapper가 JWT payload에 복사합니다. 어떤 role을 어떤 클레임 이름으로 넣을지는 Client Scope의 매퍼 설정이 정합니다.</figcaption>
+  </figure>
+
+  <h2>정리표: Role은 어디에 있나</h2>
+  <table>
+    <tr><th>구분</th><th>위치</th></tr>
+    <tr><td>Role 정의와 매핑</td><td>Keycloak DB (관리 콘솔, realm export JSON, Admin REST API로 관리)</td></tr>
+    <tr><td>Role이 토큰에 들어가는 규칙</td><td>Keycloak의 Client Scope → Protocol Mapper 설정</td></tr>
+    <tr><td>실제 전달</td><td>액세스 토큰(JWT) payload의 <code>realm_access</code> / <code>resource_access</code> 클레임</td></tr>
+    <tr><td>요청 시 위치</td><td>HTTP <code>Authorization: Bearer &lt;JWT&gt;</code> 헤더 (본문 아님)</td></tr>
+    <tr><td>검증 주체</td><td>토큰을 받는 API 서버가 서명 검증 후 클레임을 읽음</td></tr>
+  </table>
+
+  <div class="card summary">
+    <p><strong>한 줄 요약</strong>: Role은 Keycloak 설정(DB)에 살고, 토큰 발급 순간 JWT 안에 복사되어, HTTP 헤더에 실려 API까지 가며, API는 서명만 검증하고 그 값을 믿습니다.</p>
+  </div>
+</main>
+<script>
+  function toggleTheme() {
+    var r = document.documentElement;
+    var dark = r.getAttribute("data-theme") === "dark" ||
+      (!r.getAttribute("data-theme") && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    r.setAttribute("data-theme", dark ? "light" : "dark");
+  }
+</script>
+</body>
+</html>

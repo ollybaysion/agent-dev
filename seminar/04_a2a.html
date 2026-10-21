@@ -1,0 +1,1140 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>4회차 · A2A — 에이전트 간 인증과 위임</title>
+<link rel="stylesheet" href="assets/slides.css">
+</head>
+<body>
+<main class="deck" data-deck="4회차 · A2A — 에이전트 간 인증과 위임" data-index="index.html">
+
+<!-- 1. 제목 -->
+<section class="slide title">
+  <div class="kicker">에이전트 개발자를 위한 인증·인가 세미나 · 4회차</div>
+  <h1>A2A — 에이전트 간 인증과 위임</h1>
+  <p class="sub">에이전트는 누구로 API 를 부르는가</p>
+  <p class="meta">대상: Java/Spring 경험이 있는 에이전트 개발자 · 전제: 1~3회차(SSO · Keycloak · BFF) · 50분</p>
+</section>
+
+<!-- 2. 복습 + 목표 -->
+<section class="slide">
+  <h2>지난 회차 복습과 오늘의 목표</h2>
+  <div class="cols">
+    <div class="stack">
+      <div class="card note">
+        <h3>1회차 · SSO</h3>
+        <p>로그인은 IdP 한 곳에서. 앱은 서명된 <strong>JWT</strong> 만 검증한다.</p>
+      </div>
+      <div class="card note">
+        <h3>2회차 · Keycloak</h3>
+        <p>Role 은 Keycloak DB → Protocol Mapper → JWT 의 <code>realm_access.roles</code>. Spring 은 Resource Server + <code>@PreAuthorize</code>.</p>
+      </div>
+      <div class="card note">
+        <h3>3회차 · BFF</h3>
+        <p>사용자 토큰은 <strong>서버(BFF)</strong> 가 보관. 브라우저엔 HttpOnly 쿠키만. BFF 가 뒤쪽 API 로 Bearer 를 중계한다.</p>
+      </div>
+    </div>
+    <div>
+      <h3>오늘의 목표</h3>
+      <ol class="steps">
+        <li>에이전트가 API 를 부를 때 <strong>토큰이 누구 것인지</strong> 말할 수 있다</li>
+        <li>위임 모델 A/B/C 를 구분하고 <strong>Token Exchange</strong> 를 Spring 으로 구현한다</li>
+        <li><strong>MCP · A2A</strong> 프로토콜에서 인증이 어디에 끼어드는지 안다</li>
+      </ol>
+      <div class="card warn mt">
+        <p>이번 회차의 질문은 하나다.<br><strong>"에이전트는 누구로 API 를 부르는가?"</strong></p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">3회차 마지막에 던진 질문을 그대로 이어받는다. 참석자가 2회차의 roles 변환기 코드를 기억하는지 먼저 확인하면 뒤의 코드 슬라이드가 쉬워진다.</aside>
+</section>
+
+<!-- 3. 문제: 토큰이 누구 것인가 -->
+<section class="slide">
+  <h2>문제: 토큰이 누구 것인가</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 380" role="img" aria-label="사용자 kim 의 user 역할 토큰이 에이전트 플랫폼에서 끊기고, report-agent 가 자기 admin 토큰으로 report-api 를 불러 권한 상승이 생기는 그림">
+      <rect x="20" y="130" width="150" height="70" rx="10" class="svg-user"/>
+      <text x="95" y="160" text-anchor="middle" class="svg-text b">사용자 kim</text>
+      <text x="95" y="182" text-anchor="middle" class="svg-text small muted">role: user</text>
+
+      <rect x="290" y="130" width="200" height="70" rx="10" class="svg-app"/>
+      <text x="390" y="160" text-anchor="middle" class="svg-text b">에이전트 플랫폼</text>
+      <text x="390" y="182" text-anchor="middle" class="svg-text small muted">BFF 뒤의 BE</text>
+
+      <rect x="610" y="130" width="200" height="70" rx="10" class="svg-agent"/>
+      <text x="710" y="160" text-anchor="middle" class="svg-text b">report-agent</text>
+      <text x="710" y="182" text-anchor="middle" class="svg-text small muted">service account</text>
+
+      <rect x="930" y="130" width="186" height="70" rx="10" class="svg-app"/>
+      <text x="1023" y="160" text-anchor="middle" class="svg-text b">report-api</text>
+      <text x="1023" y="182" text-anchor="middle" class="svg-text small muted">@PreAuthorize</text>
+
+      <path d="M170,165 L288,165" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="229" y="224" text-anchor="middle" class="svg-text small">① 요청 + 사용자 토큰</text>
+      <path d="M490,165 L608,165" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="540" y="224" text-anchor="middle" class="svg-text small">② 에이전트 실행</text>
+      <path d="M810,165 L928,165" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="869" y="224" text-anchor="middle" class="svg-text small">③ 에이전트 토큰</text>
+
+      <rect x="130" y="20" width="200" height="78" rx="8" class="svg-token"/>
+      <text x="142" y="40" class="svg-text small b token">사용자 토큰</text>
+      <text x="142" y="58" class="svg-text mono xs">"sub": "kim"</text>
+      <text x="142" y="74" class="svg-text mono xs">"roles": ["user"]</text>
+      <text x="142" y="90" class="svg-text mono xs">"aud": "agent-platform"</text>
+      <path d="M229,98 L229,160" class="svg-line muted dashed"/>
+
+      <rect x="770" y="20" width="200" height="78" rx="8" class="svg-token"/>
+      <text x="782" y="40" class="svg-text small b token">에이전트 토큰</text>
+      <text x="782" y="58" class="svg-text mono xs">"azp": "report-agent"</text>
+      <text x="782" y="74" class="svg-text mono xs">"roles": ["admin"]</text>
+      <text x="782" y="90" class="svg-text mono xs">"sub": 사용자 없음</text>
+      <path d="M869,98 L869,160" class="svg-line muted dashed"/>
+
+      <path d="M602,110 L602,235" class="svg-line bad dashed thick"/>
+      <text x="602" y="256" text-anchor="middle" class="svg-text small bad b">여기서 kim 의 정체성이 끊긴다</text>
+
+      <rect x="20" y="270" width="560" height="92" rx="10" class="svg-group"/>
+      <text x="36" y="296" class="svg-text b">Service 계층에서 "이 사람이 admin 인가?" 를 물으면</text>
+      <text x="36" y="320" class="svg-text small">답은 <tspan class="b">이 요청에 붙어 온 토큰의 주인</tspan> 의 역할이다.</text>
+      <text x="36" y="342" class="svg-text small">토큰 주인이 에이전트면, 보이는 역할도 에이전트의 것.</text>
+
+      <rect x="610" y="270" width="506" height="92" rx="10" class="svg-bad-box"/>
+      <text x="626" y="296" class="svg-text b bad">report-api 가 보는 역할 = admin (에이전트 것)</text>
+      <text x="626" y="320" class="svg-text small">kim 은 user 인데 admin 전용 기능이 실행된다</text>
+      <text x="626" y="342" class="svg-text small">= 권한 상승(privilege escalation). 감사 로그에도 kim 이 없다.</text>
+    </svg>
+    <figcaption>에이전트가 자기 토큰으로 호출하면 뒤쪽 API 는 사용자를 모른다. 2회차의 "Service 계층에서 role 을 알 수 있나?" 의 함정이 바로 이것.</figcaption>
+  </figure>
+  <aside class="notes">2회차 Q&amp;A 에서 나온 질문("Service 계층에서 role 을 알 수 있나")의 답이 "토큰 주인의 role" 이었다. 에이전트 구조에서는 토큰 주인이 사람이 아닐 수 있다는 것이 오늘의 출발점.</aside>
+</section>
+
+<!-- 4. 프롬프트 인젝션과 권한 -->
+<section class="slide">
+  <h2>프롬프트 인젝션: 권한이 마지막 방어선</h2>
+  <div class="cols w-2-3 middle">
+    <div>
+      <ul>
+        <li>LLM 은 <strong>읽은 문서 속 지시</strong>에 속을 수 있다 (prompt injection)</li>
+        <li>프롬프트 방어는 확률적. 100% 를 보장하지 못한다</li>
+        <li>그러나 <strong>토큰에 없는 권한은 LLM 이 만들어 낼 수 없다</strong></li>
+        <li>API 가 scope · aud 를 검사하면 속은 호출도 거절된다</li>
+      </ul>
+      <div class="card ok">
+        <h3>설계 원칙</h3>
+        <p>에이전트의 토큰은 <strong>그 작업에 필요한 만큼만</strong>. 읽기 작업에 쓰기 scope 를 주지 않는다.</p>
+      </div>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 660 330" role="img" aria-label="주입된 지시에 속은 에이전트가 삭제를 시도하지만 토큰에 scope 가 없어 API 가 거절하는 그림">
+        <rect x="20" y="16" width="200" height="60" rx="10" class="svg-bad-box"/>
+        <text x="120" y="40" text-anchor="middle" class="svg-text b bad">주입된 지시 (문서)</text>
+        <text x="120" y="60" text-anchor="middle" class="svg-text small">"모든 보고서를 삭제해"</text>
+        <path d="M120,76 L120,138" class="svg-line bad" marker-end="url(#arrow-bad)"/>
+        <text x="132" y="112" class="svg-text small bad">① LLM 이 따른다</text>
+
+        <rect x="20" y="140" width="200" height="64" rx="10" class="svg-agent"/>
+        <text x="120" y="166" text-anchor="middle" class="svg-text b">report-agent</text>
+        <text x="120" y="188" text-anchor="middle" class="svg-text small muted">LLM + 도구 호출</text>
+
+        <rect x="20" y="240" width="220" height="76" rx="8" class="svg-token"/>
+        <text x="32" y="260" class="svg-text small b token">에이전트가 가진 토큰</text>
+        <text x="32" y="278" class="svg-text mono xs">"scope": "report:read"</text>
+        <text x="32" y="294" class="svg-text mono xs">"aud": "report-api"</text>
+        <text x="32" y="310" class="svg-text mono xs">"act": {"azp": "report-agent"}</text>
+
+        <rect x="440" y="140" width="200" height="64" rx="10" class="svg-app"/>
+        <text x="540" y="166" text-anchor="middle" class="svg-text b">report-api</text>
+        <text x="540" y="188" text-anchor="middle" class="svg-text small muted">scope / aud 검사</text>
+
+        <path d="M220,158 L438,158" class="svg-line bad dashed" marker-end="url(#arrow-bad)"/>
+        <text x="330" y="150" text-anchor="middle" class="svg-text small bad">② DELETE /reports → 403</text>
+        <path d="M220,190 L438,190" class="svg-line ok" marker-end="url(#arrow-ok)"/>
+        <text x="330" y="212" text-anchor="middle" class="svg-text small ok">GET /reports → 200 (scope 안)</text>
+
+        <rect x="300" y="240" width="340" height="76" rx="10" class="svg-ok-box"/>
+        <text x="316" y="264" class="svg-text b ok">권한이 마지막 방어선</text>
+        <text x="316" y="286" class="svg-text small">프롬프트는 속일 수 있어도 토큰은 못 늘린다.</text>
+        <text x="316" y="306" class="svg-text small">없는 scope · aud 는 API 가 거절한다.</text>
+      </svg>
+      <figcaption>속은 에이전트의 DELETE 는 scope 가 없어 403. 읽기는 그대로 200.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 5. 세 가지 위임 모델 -->
+<section class="slide">
+  <h2>세 가지 위임 모델</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 335" role="img" aria-label="위임 모델 세 가지 비교: A 서비스 계정은 에이전트 자기 토큰, B 패스스루는 사용자 토큰 그대로, C 토큰 교환은 사용자와 에이전트가 함께 담긴 새 토큰">
+      <!-- A -->
+      <text x="180" y="18" text-anchor="middle" class="svg-text b lg">A · 서비스 계정</text>
+      <rect x="20" y="30" width="130" height="44" rx="8" class="svg-ghost"/>
+      <text x="85" y="50" text-anchor="middle" class="svg-text small muted">사용자</text>
+      <text x="85" y="66" text-anchor="middle" class="svg-text xs muted">(관여 없음)</text>
+      <rect x="20" y="120" width="130" height="50" rx="10" class="svg-agent"/>
+      <text x="85" y="150" text-anchor="middle" class="svg-text b">에이전트</text>
+      <rect x="230" y="123" width="120" height="44" rx="8" class="svg-idp"/>
+      <text x="290" y="150" text-anchor="middle" class="svg-text b">Keycloak</text>
+      <path d="M150,138 L228,138" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="189" y="130" text-anchor="middle" class="svg-text xs">① 인증</text>
+      <path d="M230,152 L152,152" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="189" y="170" text-anchor="middle" class="svg-text xs">② 토큰</text>
+      <rect x="20" y="270" width="130" height="44" rx="8" class="svg-app"/>
+      <text x="85" y="297" text-anchor="middle" class="svg-text b">업무 API</text>
+      <path d="M85,170 L85,268" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <rect x="110" y="190" width="240" height="64" rx="8" class="svg-token"/>
+      <text x="120" y="210" class="svg-text mono xs">azp: report-agent</text>
+      <text x="120" y="226" class="svg-text mono xs">sub: (없음)</text>
+      <text x="120" y="242" class="svg-text mono xs">roles: 에이전트의 것</text>
+      <text x="180" y="330" text-anchor="middle" class="svg-text small muted">사용자와 무관한 작업(배치)에만</text>
+
+      <!-- B -->
+      <text x="568" y="18" text-anchor="middle" class="svg-text b lg">B · 사용자 토큰 패스스루</text>
+      <rect x="408" y="30" width="130" height="44" rx="8" class="svg-user"/>
+      <text x="473" y="57" text-anchor="middle" class="svg-text b">사용자 kim</text>
+      <rect x="408" y="120" width="130" height="50" rx="10" class="svg-agent"/>
+      <text x="473" y="150" text-anchor="middle" class="svg-text b">에이전트</text>
+      <rect x="618" y="123" width="120" height="44" rx="8" class="svg-ghost"/>
+      <text x="678" y="143" text-anchor="middle" class="svg-text small muted">Keycloak</text>
+      <text x="678" y="159" text-anchor="middle" class="svg-text xs muted">(관여 없음)</text>
+      <path d="M473,74 L473,118" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="482" y="100" class="svg-text xs token">사용자 토큰</text>
+      <rect x="408" y="270" width="130" height="44" rx="8" class="svg-app"/>
+      <text x="473" y="297" text-anchor="middle" class="svg-text b">업무 API</text>
+      <path d="M473,170 L473,268" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <rect x="498" y="190" width="240" height="64" rx="8" class="svg-token"/>
+      <text x="508" y="210" class="svg-text mono xs">sub: kim  aud: agent-platform</text>
+      <text x="508" y="226" class="svg-text mono xs bad">aud ≠ report-api → 거절되거나</text>
+      <text x="508" y="242" class="svg-text mono xs bad">검증 없으면 사용자 전권 통과</text>
+      <text x="568" y="330" text-anchor="middle" class="svg-text small bad b">쓰지 말 것</text>
+
+      <!-- C -->
+      <text x="956" y="18" text-anchor="middle" class="svg-text b lg">C · 토큰 교환 (Token Exchange)</text>
+      <rect x="796" y="30" width="130" height="44" rx="8" class="svg-user"/>
+      <text x="861" y="57" text-anchor="middle" class="svg-text b">사용자 kim</text>
+      <rect x="796" y="120" width="130" height="50" rx="10" class="svg-agent"/>
+      <text x="861" y="150" text-anchor="middle" class="svg-text b">에이전트</text>
+      <rect x="1006" y="123" width="120" height="44" rx="8" class="svg-idp"/>
+      <text x="1066" y="150" text-anchor="middle" class="svg-text b">Keycloak</text>
+      <path d="M861,74 L861,118" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="870" y="100" class="svg-text xs token">사용자 토큰</text>
+      <path d="M926,138 L1004,138" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="965" y="130" text-anchor="middle" class="svg-text xs">① 교환 요청</text>
+      <path d="M1006,152 L928,152" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="965" y="170" text-anchor="middle" class="svg-text xs">② 새 토큰</text>
+      <rect x="796" y="270" width="130" height="44" rx="8" class="svg-app"/>
+      <text x="861" y="297" text-anchor="middle" class="svg-text b">업무 API</text>
+      <path d="M861,170 L861,268" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <rect x="886" y="190" width="240" height="64" rx="8" class="svg-token"/>
+      <text x="896" y="210" class="svg-text mono xs">sub: kim  act: report-agent</text>
+      <text x="896" y="226" class="svg-text mono xs">aud: report-api</text>
+      <text x="896" y="242" class="svg-text mono xs">scope: report:write</text>
+      <text x="956" y="330" text-anchor="middle" class="svg-text small ok b">권장</text>
+    </svg>
+  </figure>
+  <div class="cols c-3" style="margin-top:10px">
+    <div class="card"><p><strong>A</strong> 구현은 쉽다(2회차 client credentials). 대신 누가 시켰는지 사라진다.</p></div>
+    <div class="card bad"><p><strong>B</strong> aud 불일치, 에이전트 기록 없음, 사용자 전권 노출. RFC 8693 이 이 문제를 풀려고 나왔다.</p></div>
+    <div class="card ok"><p><strong>C</strong> 사용자(sub) 와 에이전트(act) 가 한 토큰에. 대상·범위도 좁힌다.</p></div>
+  </div>
+  <aside class="notes">세 모델을 한 장에서 보여 주고, 다음 두 장에서 A/B 의 한계와 C 의 흐름을 깊게 본다. "B 가 왜 안 되나" 를 참석자에게 먼저 물어보면 좋다.</aside>
+</section>
+
+<!-- 6. 모델 A / B 상세 -->
+<section class="slide">
+  <h2>모델 A 와 B — 언제 쓰고, 왜 안 되나</h2>
+  <div class="cols">
+    <div class="card flat">
+      <h3><span class="tag agent">A</span> 서비스 계정 (client credentials)</h3>
+      <p><strong>적합한 경우</strong></p>
+      <ul>
+        <li>사용자와 무관한 작업: 야간 배치, 외부 데이터 수집, 모니터링</li>
+        <li>구현은 2회차 그대로 — <code>client_id</code> + secret 으로 토큰</li>
+      </ul>
+      <p><strong>사용자 요청 처리에 쓰면</strong></p>
+      <ul class="xlist">
+        <li>모든 사용자가 에이전트 권한으로 승격된다</li>
+        <li>감사 로그에 사용자가 없다 — 누가 시켰는지 모른다</li>
+        <li>에이전트가 늘면 "admin SA 하나 공유" 로 흐르기 쉽다</li>
+      </ul>
+    </div>
+    <div class="card flat">
+      <h3><span class="tag bad">B</span> 사용자 토큰 패스스루</h3>
+      <p>사용자 토큰을 손대지 않고 뒤쪽 API 로 그대로 전달한다.</p>
+      <ul class="xlist">
+        <li><strong>aud 불일치</strong>: 플랫폼용 토큰을 report-api 가 받는다. 제대로 검증하면 거절, 안 하면 구멍</li>
+        <li><strong>에이전트 기록 없음</strong>: 사람이 직접 한 것처럼 보인다</li>
+        <li><strong>수명 종속</strong>: 긴 에이전트 작업 중 사용자 토큰이 만료된다</li>
+        <li><strong>최소 권한 위반</strong>: 사용자의 모든 권한이 에이전트에 넘어간다</li>
+      </ul>
+      <p class="muted small">결론: 쓰지 말 것. 다음 장의 C 가 이 네 가지를 모두 해결한다.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 7. 모델 C 시퀀스 -->
+<section class="slide">
+  <h2>모델 C — Token Exchange (RFC 8693)</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 440" role="img" aria-label="사용자 토큰을 받은 오케스트레이터가 Keycloak 에 토큰 교환을 요청해 sub 는 kim, act 는 report-agent 인 새 JWT 를 받고 report-api 를 호출하는 순서">
+      <rect x="15" y="10" width="170" height="44" rx="8" class="svg-user"/>
+      <text x="100" y="38" text-anchor="middle" class="svg-text b">사용자 kim</text>
+      <rect x="245" y="10" width="170" height="44" rx="8" class="svg-app"/>
+      <text x="330" y="38" text-anchor="middle" class="svg-text b">BFF / 플랫폼</text>
+      <rect x="475" y="10" width="170" height="44" rx="8" class="svg-agent"/>
+      <text x="560" y="38" text-anchor="middle" class="svg-text b">오케스트레이터</text>
+      <rect x="715" y="10" width="170" height="44" rx="8" class="svg-idp"/>
+      <text x="800" y="38" text-anchor="middle" class="svg-text b">Keycloak</text>
+      <rect x="951" y="10" width="170" height="44" rx="8" class="svg-app"/>
+      <text x="1036" y="38" text-anchor="middle" class="svg-text b">report-api</text>
+
+      <line x1="100" y1="54" x2="100" y2="430" class="svg-lifeline"/>
+      <line x1="330" y1="54" x2="330" y2="430" class="svg-lifeline"/>
+      <line x1="560" y1="54" x2="560" y2="430" class="svg-lifeline"/>
+      <line x1="800" y1="54" x2="800" y2="430" class="svg-lifeline"/>
+      <line x1="1036" y1="54" x2="1036" y2="430" class="svg-lifeline"/>
+
+      <path d="M100,85 L322,85" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="211" y="77" text-anchor="middle" class="svg-text small">① 로그인 → 사용자 토큰</text>
+      <path d="M330,125 L552,125" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="441" y="117" text-anchor="middle" class="svg-text small">② 작업 요청 + 사용자 토큰</text>
+
+      <path d="M560,165 L792,165" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="676" y="157" text-anchor="middle" class="svg-text small">③ 토큰 교환 요청</text>
+      <rect x="580" y="177" width="250" height="60" rx="8" class="svg-token"/>
+      <text x="590" y="195" class="svg-text mono xs">subject_token = 사용자 JWT</text>
+      <text x="590" y="211" class="svg-text mono xs">audience=report-api  scope=report:write</text>
+      <text x="590" y="227" class="svg-text mono xs">client 인증 = report-agent + secret</text>
+
+      <rect x="812" y="238" width="310" height="60" rx="8" class="svg-idp"/>
+      <text x="824" y="258" class="svg-text xs b">정책: report-agent → report-api 교환 허용?</text>
+      <text x="824" y="276" class="svg-text xs">scope 가 이 client 에 허용된 범위인가?</text>
+      <text x="824" y="292" class="svg-text xs muted">(Standard token exchange, 26.2+)</text>
+
+      <path d="M800,305 L568,305" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="684" y="297" text-anchor="middle" class="svg-text small">④ 새 JWT</text>
+      <rect x="580" y="317" width="250" height="60" rx="8" class="svg-token"/>
+      <text x="590" y="335" class="svg-text mono xs">sub: kim          ← 여전히 사용자</text>
+      <text x="590" y="351" class="svg-text mono xs">act: { azp: report-agent }  ← 행위자</text>
+      <text x="590" y="367" class="svg-text mono xs">aud: report-api  scope: report:write</text>
+
+      <path d="M560,405 L1028,405" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="794" y="397" text-anchor="middle" class="svg-text small">⑤ POST /reports · Bearer 새 JWT → 감사 로그: sub=kim, act=report-agent</text>
+    </svg>
+    <figcaption>교환 결과 토큰은 사용자(sub) 와 행위자(act) 를 함께 담고, 대상(aud) 과 범위(scope) 는 좁아진다.</figcaption>
+  </figure>
+  <aside class="notes">③ 의 요청은 report-agent 가 자기 client 자격으로 한다. 즉 "누가 교환을 요청하는가" 도 Keycloak 이 안다. 그래서 정책에서 "이 client 가 이 audience 로 교환 가능한가" 를 걸 수 있다.</aside>
+</section>
+
+<!-- 8. 교환 요청/응답 -->
+<section class="slide">
+  <h2>교환 요청과 응답</h2>
+  <div class="cols w-3-2">
+    <div>
+      <p class="code-title">요청 (본문은 실제로는 한 줄 form)</p>
+<pre class="small"><code class="lang-http">POST /realms/company/protocol/openid-connect/token HTTP/1.1
+Host: kc.company.com
+Authorization: Basic base64(report-agent:secret)   # client 인증
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+&amp;subject_token=eyJhbGciOi...     # 사용자 kim 의 access token
+&amp;subject_token_type=urn:ietf:params:oauth:token-type:access_token
+&amp;audience=report-api
+&amp;scope=report:write</code></pre>
+      <p class="code-title" style="margin-top:10px">응답</p>
+<pre class="small"><code class="lang-json">{
+  "access_token": "eyJhbGciOi...",
+  "token_type": "Bearer",
+  "expires_in": 300,
+  "issued_token_type": "urn:ietf:params:oauth:token-type:access_token"
+}</code></pre>
+    </div>
+    <div>
+      <p class="code-title">응답 access_token 의 payload (디코딩)</p>
+<pre class="small"><code class="lang-json">{
+  "iss": "https://kc.company.com/realms/company",
+  "sub": "kim",
+  "azp": "report-agent",
+  "aud": "report-api",
+  "scope": "report:write",
+  "act": { "azp": "report-agent" },
+  "exp": 1760000300
+}</code></pre>
+      <div class="card note" style="margin-top:12px">
+        <h3>읽는 법</h3>
+        <ul>
+          <li><code>sub</code> 는 그대로 kim — 누구 <strong>대신</strong>인가</li>
+          <li><code>act</code> 는 report-agent — 누가 <strong>실제로</strong> 부르나</li>
+          <li><code>aud</code> · <code>scope</code> · <code>exp</code> 는 최소로, 짧게</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <aside class="notes"><code>act</code> 는 RFC 8693 의 위임(delegation) 형식이다. Keycloak 표준 교환은 sub 를 사용자, azp 를 요청 client 로 발급한다. act 클레임이 기본으로 들어가는지는 버전별로 확인하고, 없으면 매퍼로 넣는다. 발표 때 이 점을 단정하지 말 것.</aside>
+</section>
+
+<!-- 9. act 와 위임 체인 -->
+<section class="slide">
+  <h2><code>act</code> 클레임과 위임 체인</h2>
+  <div class="cols w-3-2">
+    <figure class="diagram">
+      <svg viewBox="0 0 660 330" role="img" aria-label="사용자 kim 의 토큰이 오케스트레이터와 report-agent 를 거치며 두 번 교환되고, act 가 중첩되어 감사 로그에 전체 경로가 남는 그림">
+        <rect x="250" y="10" width="160" height="40" rx="8" class="svg-idp"/>
+        <text x="330" y="35" text-anchor="middle" class="svg-text b">Keycloak</text>
+
+        <rect x="10" y="110" width="130" height="50" rx="10" class="svg-user"/>
+        <text x="75" y="140" text-anchor="middle" class="svg-text b">사용자 kim</text>
+        <rect x="185" y="110" width="140" height="50" rx="10" class="svg-agent"/>
+        <text x="255" y="140" text-anchor="middle" class="svg-text b">오케스트레이터</text>
+        <rect x="370" y="110" width="140" height="50" rx="10" class="svg-agent"/>
+        <text x="440" y="140" text-anchor="middle" class="svg-text b">report-agent</text>
+        <rect x="555" y="110" width="100" height="50" rx="10" class="svg-app"/>
+        <text x="605" y="140" text-anchor="middle" class="svg-text b">report-api</text>
+
+        <path d="M140,135 L183,135" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="161" y="127" text-anchor="middle" class="svg-text xs">토큰</text>
+        <path d="M325,135 L368,135" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <path d="M510,135 L553,135" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="531" y="127" text-anchor="middle" class="svg-text xs">호출</text>
+
+        <path d="M255,110 L300,50" class="svg-line idp dashed" marker-end="url(#arrow-idp)"/>
+        <text x="240" y="85" text-anchor="end" class="svg-text xs idp">교환 ①</text>
+        <path d="M440,110 L360,50" class="svg-line idp dashed" marker-end="url(#arrow-idp)"/>
+        <text x="455" y="85" class="svg-text xs idp">교환 ②</text>
+
+        <path d="M346,143 L346,190" class="svg-line muted dashed"/>
+        <rect x="185" y="190" width="200" height="56" rx="8" class="svg-token"/>
+        <text x="195" y="210" class="svg-text mono xs">sub: kim</text>
+        <text x="195" y="226" class="svg-text mono xs">act: { azp: orchestrator }</text>
+
+        <path d="M531,143 L531,190" class="svg-line muted dashed"/>
+        <rect x="400" y="190" width="255" height="72" rx="8" class="svg-token"/>
+        <text x="410" y="210" class="svg-text mono xs">sub: kim</text>
+        <text x="410" y="226" class="svg-text mono xs">act: { azp: report-agent,</text>
+        <text x="410" y="242" class="svg-text mono xs">       act: { azp: orchestrator } }</text>
+
+        <rect x="10" y="280" width="645" height="44" rx="8" class="svg-ok-box"/>
+        <text x="24" y="300" class="svg-text small b ok">report-api 감사 로그</text>
+        <text x="24" y="316" class="svg-text xs">kim 대신 · report-agent 가 · orchestrator 를 거쳐 — 누가, 누구 대신, 어느 경로로</text>
+      </svg>
+      <figcaption>교환할 때마다 현재 행위자가 <code>act</code> 가 되고, 이전 행위자는 그 안으로 들어간다.</figcaption>
+    </figure>
+    <div>
+      <p class="code-title">두 번째 교환 후 payload</p>
+<pre class="small"><code class="lang-json">{
+  "sub": "kim",
+  "aud": "report-api",
+  "scope": "report:write",
+  "azp": "report-agent",
+  "act": {
+    "azp": "report-agent",
+    "act": { "azp": "orchestrator" }
+  },
+  "exp": 1760000300
+}</code></pre>
+      <div class="card note" style="margin-top:12px">
+        <p><code>sub</code> 는 끝까지 kim. 체인이 길어져도 <strong>사용자 정체성은 잃지 않는다.</strong></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 10. 멀티 에이전트 팬아웃 -->
+<section class="slide">
+  <h2>멀티 에이전트: 토큰을 에이전트별로 좁힌다</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 430" role="img" aria-label="오케스트레이터가 Keycloak 에서 세 번 교환해 조사·자료·보고서 서브에이전트에 각각 다른 scope 와 aud 의 토큰을 주고, 조사 에이전트가 storage-api 를 부르면 aud 불일치로 거절되는 그림">
+      <rect x="20" y="190" width="170" height="50" rx="25" class="svg-token"/>
+      <text x="105" y="212" text-anchor="middle" class="svg-text small b token">사용자 토큰</text>
+      <text x="105" y="230" text-anchor="middle" class="svg-text mono xs">sub: kim</text>
+      <path d="M190,215 L248,215" class="svg-line token" marker-end="url(#arrow-token)"/>
+
+      <rect x="250" y="175" width="190" height="80" rx="10" class="svg-agent"/>
+      <text x="345" y="208" text-anchor="middle" class="svg-text b">오케스트레이터</text>
+      <text x="345" y="230" text-anchor="middle" class="svg-text small muted">에이전트</text>
+
+      <rect x="250" y="15" width="190" height="60" rx="10" class="svg-idp"/>
+      <text x="345" y="50" text-anchor="middle" class="svg-text b">Keycloak</text>
+      <path d="M335,175 L335,77" class="svg-line idp" marker-end="url(#arrow-idp)"/>
+      <path d="M355,75 L355,173" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="365" y="120" class="svg-text small b">토큰 교환 ×3</text>
+      <text x="365" y="138" class="svg-text xs muted">(sub: kim 유지)</text>
+
+      <path d="M440,195 L598,72" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <path d="M440,215 L598,215" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <path d="M440,235 L598,358" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="519" y="205" text-anchor="middle" class="svg-text xs muted">각각 다른 토큰</text>
+
+      <rect x="600" y="28" width="210" height="84" rx="10" class="svg-agent"/>
+      <text x="705" y="52" text-anchor="middle" class="svg-text b">조사 에이전트</text>
+      <text x="705" y="74" text-anchor="middle" class="svg-text mono xs">scope: search:read</text>
+      <text x="705" y="90" text-anchor="middle" class="svg-text mono xs">aud: search-api</text>
+
+      <rect x="600" y="173" width="210" height="84" rx="10" class="svg-agent"/>
+      <text x="705" y="197" text-anchor="middle" class="svg-text b">자료 에이전트</text>
+      <text x="705" y="219" text-anchor="middle" class="svg-text mono xs">scope: storage:read</text>
+      <text x="705" y="235" text-anchor="middle" class="svg-text mono xs">aud: storage-api</text>
+
+      <rect x="600" y="318" width="210" height="84" rx="10" class="svg-agent"/>
+      <text x="705" y="342" text-anchor="middle" class="svg-text b">보고서 에이전트</text>
+      <text x="705" y="364" text-anchor="middle" class="svg-text mono xs">scope: report:write</text>
+      <text x="705" y="380" text-anchor="middle" class="svg-text mono xs">aud: report-api</text>
+
+      <rect x="940" y="40" width="176" height="60" rx="10" class="svg-app"/>
+      <text x="1028" y="75" text-anchor="middle" class="svg-text b">search-api</text>
+      <rect x="940" y="185" width="176" height="60" rx="10" class="svg-app"/>
+      <text x="1028" y="220" text-anchor="middle" class="svg-text b">storage-api</text>
+      <rect x="940" y="330" width="176" height="60" rx="10" class="svg-app"/>
+      <text x="1028" y="365" text-anchor="middle" class="svg-text b">report-api</text>
+
+      <path d="M810,70 L938,70" class="svg-line ok" marker-end="url(#arrow-ok)"/>
+      <text x="874" y="62" text-anchor="middle" class="svg-text small ok">허용</text>
+      <path d="M810,215 L938,215" class="svg-line ok" marker-end="url(#arrow-ok)"/>
+      <text x="874" y="207" text-anchor="middle" class="svg-text small ok">허용</text>
+      <path d="M810,360 L938,360" class="svg-line ok" marker-end="url(#arrow-ok)"/>
+      <text x="874" y="352" text-anchor="middle" class="svg-text small ok">허용</text>
+
+      <path d="M810,100 L938,195" class="svg-line bad dashed" marker-end="url(#arrow-bad)"/>
+      <text x="1028" y="172" text-anchor="middle" class="svg-text small bad b">aud 불일치 → 거절</text>
+    </svg>
+    <figcaption>서브에이전트마다 다른 토큰. 조사 에이전트가 storage-api 를 불러도 aud 가 달라 401/403.</figcaption>
+  </figure>
+  <aside class="notes">"토큰 하나로 다 돌리면 편한데요" 라는 반응이 흔하다. 그 편함이 곧 앞 장의 프롬프트 인젝션 피해 범위라는 점을 연결해서 설명한다.</aside>
+</section>
+
+<!-- 11. Keycloak 설정 -->
+<section class="slide">
+  <h2>Keycloak 설정 — 교환을 허용하기</h2>
+  <div class="cols w-3-2">
+    <ol class="steps">
+      <li><strong>대상 client</strong> 만들기: <code>report-api</code> — 토큰의 <code>aud</code> 가 될 이름. 로그인은 하지 않는다.</li>
+      <li><strong>Client scope</strong> 정의: <code>report:write</code> 등. report-api 용 Audience 매퍼를 포함시킨다.</li>
+      <li><strong>요청 client</strong> <code>report-agent</code>: Client authentication ON (secret 발급), Capability config 에서 <strong>Standard token exchange</strong> ON.</li>
+      <li>report-agent 에 교환할 scope 를 할당 — 요청한 <code>scope</code> 는 이 client 에 허용된 것만 통과한다.</li>
+      <li>curl 로 교환해 보고 응답 토큰을 디코딩해 <code>aud</code> · <code>scope</code> · <code>sub</code> 확인.</li>
+    </ol>
+    <div class="stack">
+      <div class="card note">
+        <h3>버전 주의</h3>
+        <p>Standard token exchange 는 <strong>Keycloak 26.2+</strong> 정식 기능. 그 이전은 preview(<code>--features=token-exchange</code>) 와 세부 권한 정책이 필요했다.</p>
+      </div>
+      <div class="card warn">
+        <h3>허용 범위를 좁게</h3>
+        <p>교환은 "어떤 client 가 어떤 audience 로" 를 묻는 기능이다. 모든 client 에 켜 두면 모델 B 와 다를 게 없다.</p>
+      </div>
+      <div class="card">
+        <p class="small">실습 토큰만 디코더에 붙일 것. 운영 토큰은 외부 사이트에 올리지 않는다. <code>cut -d. -f2 | base64 -d</code> 면 충분하다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 12. 섹션 -->
+<section class="slide section">
+  <div class="num">03</div>
+  <h2>Spring 으로 구현</h2>
+  <p>오케스트레이터(교환 요청) · 업무 API(검증과 감사) · 비동기 함정</p>
+</section>
+
+<!-- 13. 선언형: yml -->
+<section class="slide">
+  <h2>오케스트레이터 ① 선언형 설정</h2>
+  <div class="cols w-3-2">
+    <div>
+      <p class="code-title">application.yml</p>
+<pre><code class="lang-yaml">spring:
+  security:
+    oauth2:
+      client:
+        provider:
+          keycloak:
+            issuer-uri: https://kc.company.com/realms/company
+        registration:
+          report-api-exchange:              # 교환용 등록
+            provider: keycloak
+            client-id: report-agent
+            client-secret: ${REPORT_AGENT_SECRET}
+            authorization-grant-type: &gt;-
+              urn:ietf:params:oauth:grant-type:token-exchange
+            scope: report:write</code></pre>
+    </div>
+    <div class="stack">
+      <div class="card note">
+        <h3>무엇이 다른가</h3>
+        <p><code>authorization-grant-type</code> 이 교환 grant. Spring Security 6.3+ 가 이 값을 알아듣는다.</p>
+      </div>
+      <div class="card">
+        <p>대상 API 마다 등록을 하나씩 둔다: <code>search-api-exchange</code>, <code>storage-api-exchange</code>… scope 가 각각 다르다.</p>
+      </div>
+      <div class="card warn">
+        <p><code>audience</code> 는 yml 로 못 넣는다. 다음 장에서 파라미터 변환기로 추가한다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 14. 선언형: manager + interceptor -->
+<section class="slide">
+  <h2>오케스트레이터 ② Manager 와 RestClient</h2>
+  <div class="cols w-3-2">
+    <div>
+<pre class="small"><code class="lang-java">@Bean
+OAuth2AuthorizedClientManager clientManager(
+        ClientRegistrationRepository regs,
+        OAuth2AuthorizedClientRepository repo) {
+    var rc = new RestClientTokenExchangeTokenResponseClient();
+    rc.addParametersConverter(req -&gt; MultiValueMap.fromSingleValue(
+            Map.of("audience", "report-api")));        // + audience (6.4+)
+    var exchange = new TokenExchangeOAuth2AuthorizedClientProvider();
+    exchange.setAccessTokenResponseClient(rc);
+    var manager = new DefaultOAuth2AuthorizedClientManager(regs, repo);
+    manager.setAuthorizedClientProvider(
+            OAuth2AuthorizedClientProviderBuilder.builder()
+                    .provider(exchange).build());
+    return manager;
+}
+@Bean
+RestClient reportApi(OAuth2AuthorizedClientManager manager) {
+    var oauth = new OAuth2ClientHttpRequestInterceptor(manager);   // 6.4+
+    oauth.setClientRegistrationIdResolver(r -&gt; "report-api-exchange");
+    return RestClient.builder().baseUrl("https://report-api")
+            .requestInterceptor(oauth).build();
+}</code></pre>
+    </div>
+    <div class="stack">
+      <div class="card note">
+        <h3>흐름</h3>
+        <ul>
+          <li><code>reportApi.post()…</code> 를 부르면</li>
+          <li>인터셉터가 manager 에게 토큰을 요청</li>
+          <li>manager 가 현재 SecurityContext 의 사용자 Jwt 를 <code>subject_token</code> 으로 교환 (기본 resolver)</li>
+          <li>결과를 <code>Authorization: Bearer</code> 로 붙인다</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <p>호출하는 코드에는 토큰 관련 줄이 <strong>0줄</strong>. 교환·캐시·만료 처리 모두 manager 몫.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">6.3 에서 TokenExchangeOAuth2AuthorizedClientProvider 가, 6.4 에서 RestClient 용 인터셉터와 RestClient 기반 응답 클라이언트가 들어왔다. 그 이전 버전이면 WebClient 의 ServerOAuth2AuthorizedClientExchangeFilterFunction 을 쓰거나 다음 장처럼 직접 POST 한다.</aside>
+</section>
+
+<!-- 15. 직접 POST -->
+<section class="slide">
+  <h2>오케스트레이터 ③ 직접 POST (이해용)</h2>
+  <div class="cols w-3-2">
+    <div>
+<pre class="small"><code class="lang-java">@Service
+public class TokenExchangeClient {
+    static final String GRANT =
+            "urn:ietf:params:oauth:grant-type:token-exchange";
+    static final String TOKEN_TYPE =
+            "urn:ietf:params:oauth:token-type:access_token";
+    // kc: RestClient(https://kc.company.com), secret: 주입된 client secret
+
+    public String exchangeFor(String audience, String scope) {
+        Jwt userJwt = (Jwt) SecurityContextHolder.getContext()
+                .getAuthentication().getPrincipal();    // 사용자 토큰
+        var form = new LinkedMultiValueMap&lt;String, String&gt;();
+        form.add("grant_type", GRANT);
+        form.add("subject_token", userJwt.getTokenValue());
+        form.add("subject_token_type", TOKEN_TYPE);
+        form.add("audience", audience);
+        form.add("scope", scope);
+        return kc.post()
+                .uri("/realms/company/protocol/openid-connect/token")
+                .headers(h -&gt; h.setBasicAuth("report-agent", secret))
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .body(form)
+                .retrieve().body(TokenResponse.class).accessToken();
+    }
+}</code></pre>
+    </div>
+    <div class="stack">
+      <div class="card note">
+        <h3>앞 장과 같은 일</h3>
+        <p>HTTP 로 보면 교환은 <strong>form POST 한 번</strong>이다. 8장의 요청을 코드로 옮긴 것.</p>
+      </div>
+      <div class="card warn">
+        <h3>운영에서는 ② 를</h3>
+        <p>이 코드는 캐시도 만료 처리도 없다. 매 호출마다 Keycloak 을 두드린다.</p>
+      </div>
+      <div class="card">
+        <p class="small"><code>TokenResponse</code> 는 <code>access_token</code> 만 받는 record. 응답의 <code>expires_in</code> 을 보고 캐시 여부를 정한다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 16. report-api -->
+<section class="slide">
+  <h2>업무 API — <code>act</code> 읽기와 감사 로그</h2>
+  <div class="cols w-3-2">
+    <div>
+<pre class="small"><code class="lang-java">@RestController
+public class ReportController {
+
+    @PostMapping("/reports")
+    @PreAuthorize("hasAuthority('SCOPE_report:write')")  // 교환된 scope
+    public ReportDto create(@RequestBody ReportRequest req,
+                            @AuthenticationPrincipal Jwt jwt) {
+        String user = jwt.getSubject();                  // kim — 누구 대신
+        Map&lt;String, Object&gt; act = jwt.getClaim("act");    // 누가 대신
+        String actor = act == null ? "(직접)" : chain(act);
+        audit.log("report.create", user, actor);         // kim / 경로
+        return reportService.create(req, user);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String chain(Map&lt;String, Object&gt; act) {
+        String azp = String.valueOf(act.get("azp"));
+        if (!(act.get("act") instanceof Map&lt;?, ?&gt; inner)) return azp;
+        return azp + " via " + chain((Map&lt;String, Object&gt;) inner);
+    }
+}</code></pre>
+    </div>
+    <div class="stack">
+      <div class="card note">
+        <h3>달라진 점은 두 줄</h3>
+        <p>2회차 Resource Server 설정은 그대로. <code>act</code> 를 읽어 감사 로그에 남기는 것만 추가.</p>
+      </div>
+      <div class="card warn">
+        <h3>scope 권한</h3>
+        <p>기본 변환기는 <code>scope</code> 를 <code>SCOPE_</code> 권한으로 만든다. 2회차의 roles 변환기로 바꿨다면 두 결과를 <strong>합쳐서</strong> 반환해야 한다.</p>
+      </div>
+      <div class="card ok">
+        <p>데이터 소유 검사("이 보고서가 kim 것인가") 는 여전히 <code>user</code> 기준. 에이전트가 끼어도 바뀌지 않는다.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">감사 로그의 세 칼럼: 무엇을, 누구 대신, 누가(경로). 사고 조사 때 "에이전트가 했다" 로 끝나지 않으려면 act 체인이 있어야 한다.</aside>
+</section>
+
+<!-- 17. 비동기 -->
+<section class="slide">
+  <h2>비동기 함정 — 새 스레드에는 토큰이 없다</h2>
+  <div class="cols">
+    <div>
+      <p class="code-title">❌ SecurityContext 는 ThreadLocal</p>
+<pre class="small"><code class="lang-java">@Async
+CompletableFuture&lt;Report&gt; runAsync(ReportRequest req) {
+    var auth = SecurityContextHolder.getContext()
+            .getAuthentication();        // null — 다른 스레드
+    // 교환도 @PreAuthorize 도 여기서 실패한다
+}</code></pre>
+      <p class="code-title" style="margin-top:12px">✅ 방법 1 — 컨텍스트를 전파하는 Executor</p>
+<pre class="small"><code class="lang-java">@Bean("agentExecutor")
+AsyncTaskExecutor agentExecutor() {
+    var p = new ThreadPoolTaskExecutor();
+    p.setThreadNamePrefix("agent-");
+    p.initialize();
+    return new DelegatingSecurityContextAsyncTaskExecutor(p);
+}
+// 사용: @Async("agentExecutor")</code></pre>
+    </div>
+    <div>
+      <p class="code-title">✅ 방법 2 — 필요한 값을 명시적으로 넘긴다 (권장)</p>
+<pre class="small"><code class="lang-java">String subject = userJwt.getTokenValue(); // 요청 스레드에서
+agentExecutor.submit(() -&gt;
+        runAgent(req, subject));          // 작업 스레드엔 값으로</code></pre>
+      <div class="card note" style="margin-top:14px">
+        <h3>에이전트 작업은 오래 걸린다</h3>
+        <ul>
+          <li>요청 스레드가 끝나면 ThreadLocal 도 사라진다 — 방법 1 은 짧은 작업용</li>
+          <li>작업 중 사용자 토큰이 만료되면 교환도 실패 → 작업 시작 시 <strong>필요한 토큰을 먼저 교환</strong>해 두거나, 만료 시 재교환 경로를 둔다</li>
+          <li>큐·워커 구조라면 메시지에 <code>subject_token</code> 대신 <strong>교환된 토큰</strong>을 싣는다 (범위가 좁다)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 18. 2단계 검사 -->
+<section class="slide">
+  <h2>플랫폼의 2단계 검사</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 300" role="img" aria-label="1단계는 에이전트 실행 시점에 사용자 토큰의 role 로, 2단계는 API 호출 시점에 교환된 토큰의 aud 와 scope 로 검사하는 그림. audit-agent 요청은 1단계에서 403">
+      <rect x="20" y="120" width="130" height="70" rx="10" class="svg-user"/>
+      <text x="85" y="148" text-anchor="middle" class="svg-text b">사용자 kim</text>
+      <text x="85" y="170" text-anchor="middle" class="svg-text xs muted">user, agent:report</text>
+
+      <rect x="260" y="110" width="280" height="90" rx="10" class="svg-app"/>
+      <text x="400" y="136" text-anchor="middle" class="svg-text b">에이전트 플랫폼</text>
+      <text x="400" y="158" text-anchor="middle" class="svg-text small b">1단계 · 실행 시점</text>
+      <text x="400" y="180" text-anchor="middle" class="svg-text mono xs">hasRole('agent:report') ✓</text>
+
+      <rect x="620" y="120" width="170" height="70" rx="10" class="svg-agent"/>
+      <text x="705" y="160" text-anchor="middle" class="svg-text b">report-agent</text>
+      <rect x="620" y="10" width="170" height="50" rx="10" class="svg-idp"/>
+      <text x="705" y="40" text-anchor="middle" class="svg-text b">Keycloak</text>
+
+      <rect x="880" y="110" width="236" height="90" rx="10" class="svg-app"/>
+      <text x="998" y="136" text-anchor="middle" class="svg-text b">report-api</text>
+      <text x="998" y="158" text-anchor="middle" class="svg-text small b">2단계 · 호출 시점</text>
+      <text x="998" y="180" text-anchor="middle" class="svg-text mono xs">aud=report-api ✓ scope ✓</text>
+
+      <path d="M150,150 L258,150" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="204" y="140" text-anchor="middle" class="svg-text xs">① 사용자 토큰</text>
+      <path d="M540,150 L618,150" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="579" y="140" text-anchor="middle" class="svg-text xs">② 실행</text>
+      <path d="M695,120 L695,62" class="svg-line idp" marker-end="url(#arrow-idp)"/>
+      <path d="M715,60 L715,118" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="728" y="95" class="svg-text small">③ 교환</text>
+      <path d="M790,150 L878,150" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="834" y="140" text-anchor="middle" class="svg-text xs">④ 교환 토큰</text>
+
+      <path d="M150,175 L258,175" class="svg-line bad dashed" marker-end="url(#arrow-bad)"/>
+      <text x="204" y="194" text-anchor="middle" class="svg-text xs bad">audit-agent 요청</text>
+      <path d="M400,200 L400,228" class="svg-line bad dashed"/>
+      <rect x="260" y="230" width="280" height="56" rx="10" class="svg-bad-box"/>
+      <text x="400" y="254" text-anchor="middle" class="svg-text b bad">hasRole('agent:audit') ✗ → 403</text>
+      <text x="400" y="274" text-anchor="middle" class="svg-text small">에이전트 실행 자체가 거절된다</text>
+
+      <rect x="620" y="230" width="496" height="56" rx="10" class="svg-ok-box"/>
+      <text x="636" y="254" class="svg-text b ok">두 단계 모두 토큰 안의 값으로 판단한다</text>
+      <text x="636" y="274" class="svg-text small">사용자 role 은 1단계, 에이전트 scope · aud 는 2단계</text>
+    </svg>
+    <figcaption>"kim 이 이 에이전트를 쓸 수 있나" 와 "이 에이전트가 kim 대신 이 API 를 부를 수 있나" 는 다른 질문이고, 둘 다 묻는다.</figcaption>
+  </figure>
+</section>
+
+<!-- 19. 섹션 -->
+<section class="slide section">
+  <div class="num">04</div>
+  <h2>MCP 와 A2A</h2>
+  <p>도구 연결과 에이전트 연결 — 인증은 어디에 끼어드는가</p>
+</section>
+
+<!-- 20. MCP 인증 -->
+<section class="slide">
+  <h2>MCP 서버 인증 — 도구도 Resource Server</h2>
+  <div class="cols w-2-3 middle">
+    <div>
+      <ul>
+        <li class="small"><strong>MCP</strong>(Model Context Protocol): 모델이 도구·데이터에 붙는 표준. 인증 사양(2025-06)은 <strong>OAuth 2.1</strong></li>
+        <li class="small">MCP 서버는 그냥 <strong>Resource Server</strong> — 2회차와 같은 JWT 검증</li>
+        <li class="small">401 의 <code>WWW-Authenticate</code> 가 메타데이터 위치를 알려준다 (RFC 9728)</li>
+        <li class="small">인가 서버(Keycloak) 정보는 <code>/.well-known/oauth-protected-resource</code> 에서</li>
+        <li class="small"><strong>PKCE 필수</strong>, <code>resource</code> 파라미터(RFC 8707)로 토큰의 aud 를 그 MCP 서버로 고정</li>
+        <li class="small">동적 클라이언트 등록(RFC 7591) 권장 — 에이전트가 사전 등록 없이 client 가 된다</li>
+      </ul>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 660 365" role="img" aria-label="MCP 클라이언트인 에이전트가 401 을 받고 보호 자원 메타데이터로 Keycloak 을 찾아 PKCE 로 토큰을 받은 뒤 Bearer 로 MCP 서버를 부르는 순서">
+        <rect x="10" y="8" width="170" height="50" rx="8" class="svg-agent"/>
+        <text x="95" y="28" text-anchor="middle" class="svg-text b">에이전트</text>
+        <text x="95" y="46" text-anchor="middle" class="svg-text xs muted">(MCP 클라이언트)</text>
+        <rect x="245" y="8" width="170" height="50" rx="8" class="svg-app"/>
+        <text x="330" y="28" text-anchor="middle" class="svg-text b">MCP 서버</text>
+        <text x="330" y="46" text-anchor="middle" class="svg-text xs muted">(Resource Server)</text>
+        <rect x="480" y="8" width="170" height="50" rx="8" class="svg-idp"/>
+        <text x="565" y="28" text-anchor="middle" class="svg-text b">Keycloak</text>
+        <text x="565" y="46" text-anchor="middle" class="svg-text xs muted">(Authorization Server)</text>
+        <line x1="95" y1="58" x2="95" y2="360" class="svg-lifeline"/>
+        <line x1="330" y1="58" x2="330" y2="360" class="svg-lifeline"/>
+        <line x1="565" y1="58" x2="565" y2="360" class="svg-lifeline"/>
+
+        <path d="M95,85 L322,85" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="212" y="77" text-anchor="middle" class="svg-text small">① 요청 (토큰 없음)</text>
+        <path d="M330,118 L103,118" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="212" y="110" text-anchor="middle" class="svg-text small">② 401 + WWW-Authenticate</text>
+        <text x="212" y="131" text-anchor="middle" class="svg-text mono xs muted">resource_metadata=…</text>
+        <path d="M95,160 L322,160" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="212" y="152" text-anchor="middle" class="svg-text small">③ GET /.well-known/</text>
+        <text x="212" y="173" text-anchor="middle" class="svg-text mono xs muted">oauth-protected-resource</text>
+        <path d="M330,205 L103,205" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="212" y="197" text-anchor="middle" class="svg-text small">④ 인가 서버 = Keycloak</text>
+        <path d="M95,245 L557,245" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="326" y="237" text-anchor="middle" class="svg-text small">⑤ 메타데이터 조회 → PKCE 인가 (resource=MCP 서버)</text>
+        <path d="M565,285 L103,285" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="330" y="277" text-anchor="middle" class="svg-text small">⑥ access token (aud = MCP 서버)</text>
+        <path d="M95,320 L322,320" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="212" y="312" text-anchor="middle" class="svg-text small">⑦ Bearer 로 도구 호출</text>
+        <path d="M330,350 L103,350" class="svg-line ok" marker-end="url(#arrow-ok)"/>
+        <text x="212" y="342" text-anchor="middle" class="svg-text small ok">⑧ 200 (서명 · aud 검증)</text>
+      </svg>
+      <figcaption>에이전트는 MCP 서버가 알려 주는 대로 인가 서버를 찾는다. 서버 쪽 검증은 2회차 그대로.</figcaption>
+    </figure>
+  </div>
+  <aside class="notes">사내 MCP 서버를 Spring 으로 만든다면 설정은 2회차 Resource Server + aud 검증기와 동일하다. 추가로 RFC 9728 메타데이터 엔드포인트 하나와 401 응답의 WWW-Authenticate 헤더만 더 내면 된다.</aside>
+</section>
+
+<!-- 21. A2A 개요 -->
+<section class="slide">
+  <h2>A2A 프로토콜 — 에이전트끼리 일을 주고받기</h2>
+  <div class="cols w-2-3 middle">
+    <div>
+      <ul>
+        <li class="small"><strong>A2A</strong>(Agent2Agent): 에이전트 간 상호운용 공개 프로토콜. Google 2025.4 공개 → 2025.6 Linux Foundation 이관</li>
+        <li class="small"><strong>Agent Card</strong>: 원격 에이전트의 명함 — 이름, skills, 입출력, 인증 방식</li>
+        <li class="small"><strong>Task</strong>: 작업 단위. 상태 머신으로 진행 (submitted → working → … → completed)</li>
+        <li class="small"><strong>Message / Artifact</strong>: 주고받는 메시지와 결과물. SSE 로 진행 상황 스트리밍</li>
+        <li class="small">전송: JSON-RPC 2.0 over HTTP(S) — <code>message/send</code>, <code>message/stream</code>, <code>tasks/get</code>. v0.3 부터 gRPC · HTTP+JSON 도</li>
+        <li class="small">인증은 프로토콜 밖 <strong>HTTP 계층</strong> — 즉 Bearer JWT. 우리 Keycloak 그대로</li>
+      </ul>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 660 340" role="img" aria-label="클라이언트 에이전트가 원격 에이전트의 Agent Card 를 읽고 message/send 로 작업을 보내며, Task 가 submitted 에서 completed 까지 진행하는 그림">
+        <rect x="10" y="30" width="190" height="64" rx="10" class="svg-agent"/>
+        <text x="105" y="56" text-anchor="middle" class="svg-text b">클라이언트 에이전트</text>
+        <text x="105" y="78" text-anchor="middle" class="svg-text xs muted">(요청하는 쪽)</text>
+        <rect x="460" y="30" width="190" height="64" rx="10" class="svg-agent"/>
+        <text x="555" y="56" text-anchor="middle" class="svg-text b">원격 에이전트</text>
+        <text x="555" y="78" text-anchor="middle" class="svg-text xs muted">(작업 수행)</text>
+        <rect x="450" y="130" width="200" height="60" rx="10" class="svg-app"/>
+        <text x="550" y="154" text-anchor="middle" class="svg-text b">Agent Card</text>
+        <text x="550" y="176" text-anchor="middle" class="svg-text mono xs">/.well-known/agent-card.json</text>
+
+        <path d="M200,80 L448,150" class="svg-line muted dashed" marker-end="url(#arrow-muted)"/>
+        <text x="330" y="172" text-anchor="middle" class="svg-text xs muted">① 카드 조회 (GET, 인증 전)</text>
+        <path d="M200,50 L458,50" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="329" y="42" text-anchor="middle" class="svg-text small">② message/send + Bearer 토큰</text>
+        <path d="M460,70 L202,70" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="331" y="86" text-anchor="middle" class="svg-text small">③ Task 상태 · Artifact (SSE 가능)</text>
+
+        <text x="10" y="226" class="svg-text small b">Task 생애주기</text>
+        <rect x="10" y="240" width="118" height="36" rx="8" class="svg-group"/>
+        <text x="69" y="263" text-anchor="middle" class="svg-text mono xs">submitted</text>
+        <path d="M128,258 L158,258" class="svg-line" marker-end="url(#arrow)"/>
+        <rect x="160" y="240" width="118" height="36" rx="8" class="svg-group"/>
+        <text x="219" y="263" text-anchor="middle" class="svg-text mono xs">working</text>
+        <path d="M278,258 L308,258" class="svg-line" marker-end="url(#arrow)"/>
+        <rect x="310" y="240" width="140" height="36" rx="8" class="svg-token"/>
+        <text x="380" y="263" text-anchor="middle" class="svg-text mono xs">input-required</text>
+        <path d="M450,258 L488,258" class="svg-line" marker-end="url(#arrow)"/>
+        <rect x="490" y="240" width="118" height="36" rx="8" class="svg-ok-box"/>
+        <text x="549" y="263" text-anchor="middle" class="svg-text mono xs">completed</text>
+        <path d="M380,240 L380,228 L219,228 L219,238" class="svg-line muted dashed" marker-end="url(#arrow-muted)"/>
+        <text x="10" y="310" class="svg-text xs muted">실패 시 failed · 취소 시 canceled · input-required = 추가 입력 대기 (사람 승인 게이트에 쓴다)</text>
+      </svg>
+      <figcaption>카드는 공개(인증 전)로 읽고, 작업 요청부터는 Bearer 토큰이 붙는다.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 22. Agent Card -->
+<section class="slide">
+  <h2>Agent Card — 인증 방식을 선언한다</h2>
+  <div class="cols w-3-2">
+    <div>
+<pre style="font-size:13px;line-height:1.4;padding:10px 14px"><code class="lang-json">{
+  "name": "Report Agent",
+  "description": "보고서 초안 작성과 검토",
+  "url": "https://agents.company.com/report",
+  "version": "1.2.0",
+  "capabilities": { "streaming": true },
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain", "application/pdf"],
+  "skills": [
+    { "id": "draft", "name": "보고서 초안", "tags": ["report"] }
+  ],
+  "securitySchemes": {
+    "keycloak": {
+      "type": "openIdConnect",
+      "openIdConnectUrl":
+        "https://kc.company.com/realms/company/.well-known/openid-configuration"
+    }
+  },
+  "security": [ { "keycloak": ["agent:report"] } ]
+}</code></pre>
+    </div>
+    <div class="stack">
+      <div class="card note">
+        <h3>securitySchemes</h3>
+        <p>OpenAPI 와 같은 형식. <code>openIdConnect</code> 외에 <code>oauth2</code>, <code>apiKey</code>, <code>http</code>(bearer) 가능.</p>
+      </div>
+      <div class="card note">
+        <h3>security</h3>
+        <p>"이 에이전트를 부르려면 keycloak 방식으로 <code>agent:report</code> scope 가 있는 토큰". 호출자는 discovery 문서에서 토큰 엔드포인트를 찾는다.</p>
+      </div>
+      <div class="card">
+        <p class="small">로그인 후에만 보이는 skill 은 <code>agent/getAuthenticatedExtendedCard</code>(인증된 확장 카드)로 따로 준다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 23. A2A + Keycloak 시퀀스 -->
+<section class="slide">
+  <h2>A2A + Keycloak — 사용자 정체성을 들고 원격 에이전트 부르기</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 440" role="img" aria-label="클라이언트 에이전트가 Agent Card 를 읽고 Keycloak 에서 토큰 교환으로 remote-agent 용 JWT 를 받아 message/send 를 Bearer 로 보내고, 원격 에이전트가 검증 후 Task 와 Artifact 를 돌려주는 순서">
+      <rect x="10" y="10" width="200" height="50" rx="8" class="svg-app"/>
+      <text x="110" y="40" text-anchor="middle" class="svg-text b">사용자 / 플랫폼</text>
+      <rect x="270" y="10" width="200" height="50" rx="8" class="svg-agent"/>
+      <text x="370" y="40" text-anchor="middle" class="svg-text b">클라이언트 에이전트</text>
+      <rect x="540" y="10" width="200" height="50" rx="8" class="svg-idp"/>
+      <text x="640" y="40" text-anchor="middle" class="svg-text b">Keycloak</text>
+      <rect x="800" y="10" width="240" height="50" rx="8" class="svg-agent"/>
+      <text x="920" y="31" text-anchor="middle" class="svg-text b">원격 에이전트</text>
+      <text x="920" y="49" text-anchor="middle" class="svg-text xs muted">(Resource Server)</text>
+      <line x1="110" y1="60" x2="110" y2="430" class="svg-lifeline"/>
+      <line x1="370" y1="60" x2="370" y2="430" class="svg-lifeline"/>
+      <line x1="640" y1="60" x2="640" y2="430" class="svg-lifeline"/>
+      <line x1="920" y1="60" x2="920" y2="430" class="svg-lifeline"/>
+
+      <path d="M110,100 L362,100" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="236" y="92" text-anchor="middle" class="svg-text small">① 작업 + 사용자 토큰</text>
+      <path d="M370,140 L912,140" class="svg-line muted dashed" marker-end="url(#arrow-muted)"/>
+      <text x="641" y="132" text-anchor="middle" class="svg-text small muted">② GET /.well-known/agent-card.json</text>
+      <path d="M920,175 L378,175" class="svg-line muted" marker-end="url(#arrow-muted)"/>
+      <text x="649" y="167" text-anchor="middle" class="svg-text small muted">③ 카드: openIdConnect(Keycloak), 필요 scope agent:report</text>
+      <path d="M370,220 L632,220" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="501" y="212" text-anchor="middle" class="svg-text small">④ 토큰 교환 (audience=remote-agent)</text>
+      <path d="M640,260 L378,260" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="509" y="252" text-anchor="middle" class="svg-text small">⑤ 새 JWT</text>
+      <rect x="400" y="270" width="320" height="44" rx="8" class="svg-token"/>
+      <text x="410" y="288" class="svg-text mono xs">sub: kim · act: { azp: client-agent }</text>
+      <text x="410" y="304" class="svg-text mono xs">aud: remote-agent · scope: agent:report</text>
+      <path d="M370,335 L912,335" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="641" y="327" text-anchor="middle" class="svg-text small">⑥ message/send · Authorization: Bearer</text>
+      <rect x="790" y="345" width="336" height="50" rx="8" class="svg-ok-box"/>
+      <text x="802" y="364" class="svg-text small b ok">⑦ 서명 · aud · scope 검증 (2회차)</text>
+      <text x="802" y="383" class="svg-text xs">하위 호출 시 자기도 act 체인에 추가</text>
+      <path d="M920,418 L378,418" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="649" y="410" text-anchor="middle" class="svg-text small">⑧ Task(completed) + Artifact (SSE)</text>
+    </svg>
+    <figcaption>원격 에이전트도 Resource Server. 받은 토큰에 kim 과 client-agent 가 함께 있으니 감사 체인이 끊기지 않는다.</figcaption>
+  </figure>
+  <aside class="notes">②③ 은 인증 없이 공개 정보를 읽는 단계. ④ 에서 "누구 대신(kim) · 누가(client-agent) · 어디로(remote-agent)" 가 모두 정해진다. 원격 에이전트가 다시 다른 API 를 부르면 10장의 팬아웃과 같은 그림이 반복된다.</aside>
+</section>
+
+<!-- 24. MCP vs A2A -->
+<section class="slide">
+  <h2>MCP 와 A2A — 무엇이 다른가</h2>
+  <table>
+    <thead><tr><th style="width:16%">구분</th><th>MCP</th><th>A2A</th></tr></thead>
+    <tbody>
+      <tr><td>목적</td><td>모델 ↔ 도구 · 데이터 연결</td><td>에이전트 ↔ 에이전트 협업</td></tr>
+      <tr><td>상대</td><td>MCP 서버 (도구 제공)</td><td>원격 에이전트 (작업 수행)</td></tr>
+      <tr><td>발견</td><td>서버 설정 · Protected Resource Metadata (RFC 9728)</td><td>Agent Card (<code>/.well-known/agent-card.json</code>)</td></tr>
+      <tr><td>인증</td><td>OAuth 2.1 + PKCE + <code>resource</code> 파라미터</td><td>HTTP 계층 — <code>securitySchemes</code> (OIDC / OAuth2 / apiKey / bearer)</td></tr>
+      <tr><td>전송</td><td>JSON-RPC 2.0 (stdio / Streamable HTTP)</td><td>JSON-RPC 2.0 over HTTP, SSE, gRPC (v0.3)</td></tr>
+      <tr><td>단위</td><td>tool call</td><td>Task · Message · Artifact</td></tr>
+    </tbody>
+  </table>
+  <div class="card ok mt">
+    <p>둘 다 <strong>서버 쪽 토큰 검증은 2회차 Resource Server 그대로</strong>이고, 사용자 정체성을 들고 가려면 <strong>Token Exchange</strong> 를 앞에 둔다. 상호 보완 관계이지 택일이 아니다.</p>
+  </div>
+</section>
+
+<!-- 25. 보안 원칙 -->
+<section class="slide">
+  <h2>에이전트 권한 설계 원칙</h2>
+  <div class="cols c-3">
+    <div class="card ok"><h3>최소 권한</h3><p>scope · aud 를 <strong>에이전트별 · 작업별</strong>로. 읽기 작업에 쓰기 scope 를 주지 않는다.</p></div>
+    <div class="card ok"><h3>짧은 수명</h3><p>교환된 토큰은 5~15분. 긴 작업은 재교환. 탈취돼도 피해 창이 짧다.</p></div>
+    <div class="card ok"><h3>사용자 정체성 유지</h3><p><code>sub</code> 는 사용자, 에이전트는 <code>act</code>. 서비스 계정 토큰으로 사용자 요청을 처리하지 않는다.</p></div>
+  </div>
+  <div class="cols c-3" style="margin-top:16px">
+    <div class="card ok"><h3>감사 로그</h3><p>무엇을 · 누구 대신 · 누가(act 체인). 사고 조사가 "에이전트가 했다" 로 끝나지 않게.</p></div>
+    <div class="card ok"><h3>사람 승인 게이트</h3><p>고위험 작업(삭제, 송금, 배포)은 scope 를 <strong>처음부터 주지 않고</strong> 승인 후 발급. A2A 의 input-required 가 이 자리.</p></div>
+    <div class="card ok"><h3>토큰을 모델에게 주지 않기</h3><p>토큰은 프롬프트 · LLM 컨텍스트 · 로그에 넣지 않는다. 호출은 코드(인터셉터)가 붙인다.</p></div>
+  </div>
+</section>
+
+<!-- 26. 자주 하는 실수 -->
+<section class="slide">
+  <h2>자주 하는 실수</h2>
+  <div class="cols c-3">
+    <div class="card bad"><h3>❌ admin 서비스 계정 하나를 공유</h3><p>모든 에이전트 · 모든 서브에이전트가 같은 토큰. 프롬프트 인젝션 한 번이 전사 권한이 된다.</p></div>
+    <div class="card bad"><h3>❌ 사용자 토큰 패스스루</h3><p>aud 불일치, 에이전트 기록 없음, 사용자 전권 노출. 모델 B 다.</p></div>
+    <div class="card bad"><h3>❌ act 를 기록하지 않음</h3><p>토큰에 있어도 로그에 안 남기면 없는 것. 감사 로그 칼럼을 먼저 설계한다.</p></div>
+  </div>
+  <div class="cols c-3" style="margin-top:16px">
+    <div class="card bad"><h3>❌ 토큰을 프롬프트 · 로그에</h3><p>"이 토큰으로 호출해" 라고 모델에게 주면 출력 · 로그 · 추적 데이터로 샌다.</p></div>
+    <div class="card bad"><h3>❌ 교환 정책 전면 허용</h3><p>모든 client 가 모든 audience 로 교환 가능하면 Keycloak 이 토큰 복사기가 된다.</p></div>
+    <div class="card bad"><h3>❌ 비동기에서 SecurityContext 유실</h3><p><code>@Async</code> 스레드에서 null. 전파 Executor 를 쓰거나 값을 명시적으로 넘긴다.</p></div>
+  </div>
+</section>
+
+<!-- 27. 시리즈 요약 -->
+<section class="slide">
+  <h2>시리즈 전체 요약 — 한 장의 아키텍처</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 300" role="img" aria-label="브라우저가 쿠키로 BFF 를, BFF 가 사용자 토큰으로 에이전트 플랫폼을, 플랫폼이 에이전트를 실행하고, 에이전트는 Keycloak 교환 토큰으로 MCP 서버 · 업무 API · 원격 A2A 에이전트를 부르는 전체 그림">
+      <rect x="10" y="130" width="120" height="60" rx="10" class="svg-user"/>
+      <text x="70" y="165" text-anchor="middle" class="svg-text b">브라우저</text>
+      <rect x="180" y="130" width="120" height="60" rx="10" class="svg-app"/>
+      <text x="240" y="165" text-anchor="middle" class="svg-text b">BFF</text>
+      <rect x="360" y="130" width="150" height="60" rx="10" class="svg-app"/>
+      <text x="435" y="165" text-anchor="middle" class="svg-text b">에이전트 플랫폼</text>
+      <rect x="580" y="130" width="140" height="60" rx="10" class="svg-agent"/>
+      <text x="650" y="165" text-anchor="middle" class="svg-text b">에이전트</text>
+      <rect x="360" y="15" width="380" height="56" rx="10" class="svg-idp"/>
+      <text x="550" y="42" text-anchor="middle" class="svg-text b">Keycloak (realm: company)</text>
+      <text x="550" y="60" text-anchor="middle" class="svg-text xs muted">로그인 · 역할 · 교환 · 공개키</text>
+
+      <rect x="860" y="30" width="256" height="56" rx="10" class="svg-app"/>
+      <text x="988" y="63" text-anchor="middle" class="svg-text b">MCP 서버 (도구)</text>
+      <rect x="860" y="132" width="256" height="56" rx="10" class="svg-app"/>
+      <text x="988" y="165" text-anchor="middle" class="svg-text b">업무 API</text>
+      <rect x="860" y="234" width="256" height="56" rx="10" class="svg-agent"/>
+      <text x="988" y="267" text-anchor="middle" class="svg-text b">원격 A2A 에이전트</text>
+
+      <path d="M130,160 L178,160" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="154" y="150" text-anchor="middle" class="svg-text xs">쿠키</text>
+      <text x="154" y="180" text-anchor="middle" class="svg-text xs muted">3회차</text>
+      <path d="M300,160 L358,160" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="329" y="150" text-anchor="middle" class="svg-text xs">사용자 토큰</text>
+      <path d="M510,160 L578,160" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="544" y="150" text-anchor="middle" class="svg-text xs">실행</text>
+
+      <path d="M240,130 L400,71" class="svg-line idp dashed" marker-end="url(#arrow-idp)"/>
+      <text x="232" y="116" text-anchor="end" class="svg-text xs idp">로그인 (1 · 3회차)</text>
+      <path d="M650,130 L650,73" class="svg-line idp" marker-end="url(#arrow-idp)"/>
+      <text x="660" y="105" class="svg-text xs idp">교환 (4회차)</text>
+      <path d="M870,132 L742,55" class="svg-line muted dashed" marker-end="url(#arrow-muted)"/>
+      <text x="836" y="131" text-anchor="end" class="svg-text xs muted">공개키 (2회차)</text>
+
+      <path d="M720,150 L858,60" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <path d="M720,160 L858,160" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <path d="M720,170 L858,260" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="800" y="180" text-anchor="middle" class="svg-text xs">aud 별로 다른 토큰</text>
+    </svg>
+  </figure>
+  <div class="cols" style="grid-template-columns:repeat(4,1fr);gap:14px;margin-top:10px">
+    <div class="card flat"><p class="small"><strong>1 · SSO</strong> 로그인은 IdP 한 곳, 앱은 서명된 JWT 만 검증</p></div>
+    <div class="card flat"><p class="small"><strong>2 · Keycloak</strong> Role → 매퍼 → JWT. Spring 은 Resource Server + aud 검증</p></div>
+    <div class="card flat"><p class="small"><strong>3 · BFF</strong> 토큰은 서버에, 브라우저엔 쿠키. API 는 401, 페이지는 302</p></div>
+    <div class="card flat"><p class="small"><strong>4 · A2A</strong> 사용자(sub) + 에이전트(act) 를 교환 토큰에. aud · scope 는 최소로</p></div>
+  </div>
+</section>
+
+<!-- 28. 참고 자료 -->
+<section class="slide">
+  <h2>참고 자료</h2>
+  <div class="cols">
+    <div>
+      <h3>표준 (IETF · OIDF)</h3>
+      <ul>
+        <li class="small">RFC 6749 OAuth 2.0 · RFC 7636 PKCE · RFC 7519 JWT</li>
+        <li class="small"><strong>RFC 8693 OAuth 2.0 Token Exchange</strong> — <code>act</code>, <code>may_act</code></li>
+        <li class="small">RFC 8707 Resource Indicators · RFC 9728 Protected Resource Metadata</li>
+        <li class="small">RFC 8414 Authorization Server Metadata · RFC 7591 Dynamic Client Registration</li>
+        <li class="small">OpenID Connect Core 1.0 · OAuth 2.0 for Browser-Based Applications (BCP)</li>
+      </ul>
+    </div>
+    <div>
+      <h3>구현 · 프로토콜</h3>
+      <ul>
+        <li class="small">Keycloak Server Administration Guide — Token exchange (standard, 26.2+)</li>
+        <li class="small">Spring Security Reference — OAuth 2.0 Client: Token Exchange grant, <code>OAuth2ClientHttpRequestInterceptor</code></li>
+        <li class="small">Spring Security Reference — OAuth 2.0 Resource Server (JWT)</li>
+        <li class="small">Model Context Protocol — Authorization (2025-06-18)</li>
+        <li class="small">A2A (Agent2Agent) Protocol Specification — Agent Card, Task, securitySchemes</li>
+      </ul>
+      <div class="card note mt">
+        <p class="small">이 시리즈의 모든 코드는 Spring Boot 3.5 / Spring Security 6.5 / Keycloak 26.x 기준. 버전이 다르면 grant 지원 여부를 먼저 확인한다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+<script src="assets/slides.js"></script>
+</body>
+</html>

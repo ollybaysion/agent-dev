@@ -1,0 +1,966 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2회차 · Keycloak — IdP를 직접 운영하기</title>
+<link rel="stylesheet" href="assets/slides.css">
+</head>
+<body>
+<main class="deck" data-deck="2회차 · Keycloak — IdP를 직접 운영하기" data-index="index.html">
+
+<!-- 1. 제목 -->
+<section class="slide title">
+  <div class="kicker">에이전트 개발자를 위한 인증·인가 세미나 · 2회차</div>
+  <h1>Keycloak — IdP를 직접 운영하기</h1>
+  <p class="sub">Realm · Client · Role이 토큰의 어떤 값이 되는가</p>
+  <p class="meta">대상: Java/Spring 경험이 있는 에이전트 개발자 · 사전 지식: 1회차(SSO · OIDC · JWT) · 50분</p>
+</section>
+
+<!-- 2. 복습 -->
+<section class="slide">
+  <h2>지난 회차 복습 — 세 가지만 기억하면 된다</h2>
+  <div class="cols c-3">
+    <div class="card note">
+      <h3>IdP (Identity Provider)</h3>
+      <p>로그인을 맡는 한 곳. 앱은 로그인 화면을 만들지 않고 IdP가 발급한 <strong>토큰</strong>만 믿는다.</p>
+      <p class="muted small">오늘의 IdP = Keycloak</p>
+    </div>
+    <div class="card note">
+      <h3>Authorization Code 흐름</h3>
+      <p>브라우저는 <code>code</code>만 받고, 앱 서버가 <code>code</code> + secret으로 토큰을 받는다 (백 채널).</p>
+      <p class="muted small">토큰이 URL에 남지 않는다</p>
+    </div>
+    <div class="card note">
+      <h3>JWT 서명 검증</h3>
+      <p>토큰은 IdP의 개인키로 서명된다. API는 <strong>공개키</strong>로 검증하므로 요청마다 IdP에 물어볼 필요가 없다.</p>
+      <p class="muted small">header . payload . signature</p>
+    </div>
+  </div>
+  <p class="lead mt">오늘은 이 IdP를 <strong>직접 설치·설정</strong>하고, 설정한 값이 토큰 안의 어떤 필드가 되는지, Spring이 그것을 어떻게 검증하는지 본다.</p>
+</section>
+
+<!-- 3. 목표 -->
+<section class="slide">
+  <h2>오늘의 목표</h2>
+  <div class="cols w-3-2">
+    <ol class="steps">
+      <li><strong>Keycloak의 핵심 객체</strong>(Realm, Client, User, Role, Scope, Mapper)가 무엇이고 서로 어떻게 연결되는지 그림으로 설명할 수 있다.</li>
+      <li>관리 콘솔에서 설정한 <strong>Role이 JWT의 어느 클레임</strong>에 어떤 모양으로 들어가는지 안다.</li>
+      <li>Spring Boot API를 <strong>Resource Server</strong>로 만들어 토큰 서명 · <code>aud</code> · Role을 검증하고, 에이전트용 <strong>Service Account</strong>로 토큰을 받아 호출할 수 있다.</li>
+    </ol>
+    <div class="card">
+      <h3>오늘 다루지 않는 것</h3>
+      <ul>
+        <li>브라우저(FE)에 토큰을 두는 문제 → 3회차 BFF</li>
+        <li>에이전트가 사용자를 대신하는 문제 → 4회차 A2A</li>
+        <li>운영 배포(HA, DB, TLS) → 참고 자료</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 4. Keycloak이란 -->
+<section class="slide">
+  <h2>Keycloak이란 — 오픈소스 IdP</h2>
+  <ul>
+    <li>2014년 Red Hat(JBoss)에서 시작, 2023년 <strong>CNCF</strong>(클라우드 네이티브 컴퓨팅 재단) 프로젝트로 이관. Apache 2.0 라이선스</li>
+    <li><strong>OIDC · OAuth 2.0 · SAML 2.0</strong> 표준을 모두 지원 → Spring Security 같은 표준 클라이언트가 그대로 붙는다</li>
+    <li>사내 서버·컨테이너에 <strong>직접 설치(온프레미스)</strong> 가능 → 인증 데이터를 밖으로 내보내기 어려운 기업 환경에서 선택</li>
+  </ul>
+  <table class="compact mt">
+    <thead><tr><th style="width:16%"></th><th>Keycloak</th><th>Okta / Auth0</th><th>Microsoft Entra ID</th><th>AWS Cognito</th></tr></thead>
+    <tbody>
+      <tr><td>형태</td><td class="ok">오픈소스, 직접 설치</td><td>SaaS</td><td>SaaS (M365 연동)</td><td>AWS 관리형</td></tr>
+      <tr><td>비용</td><td>무료 (운영 인력 필요)</td><td>사용자 수 과금</td><td>라이선스</td><td>사용량 과금</td></tr>
+      <tr><td>사내 AD/LDAP</td><td>User Federation 내장</td><td>에이전트 설치</td><td>자체가 AD 계열</td><td>제한적</td></tr>
+      <tr><td>데이터 위치</td><td class="ok">사내 가능</td><td>외부</td><td>외부</td><td>AWS 리전</td></tr>
+      <tr><td>표준</td><td>OIDC · OAuth2 · SAML</td><td>동일</td><td>동일</td><td>OIDC · OAuth2 · SAML</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 5. 전체 구조 -->
+<section class="slide">
+  <h2>전체 구조 — Keycloak은 토큰을 발급하고, 검증용 공개키를 제공한다</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 470" role="img" aria-label="왼쪽 Keycloak realm 상자 안에 Users, Roles, Clients, Client Scopes, Keys가 있고, 오른쪽의 업무 앱과 AI 에이전트가 각각 토큰을 요청해 JWT를 받은 뒤 업무 API를 Bearer로 호출하며, 업무 API는 Keycloak에서 공개키를 조회한다">
+      <!-- Keycloak realm -->
+      <rect x="20" y="16" width="360" height="400" rx="14" class="svg-idp"/>
+      <text x="200" y="44" text-anchor="middle" class="svg-text b lg">Keycloak · realm: company</text>
+      <rect x="36" y="62" width="328" height="40" rx="6" class="svg-group"/>
+      <text x="46" y="79" class="svg-text b small">Users · Groups</text>
+      <text x="46" y="95" class="svg-text xs muted">kim · 영업팀 · service-account-report-agent</text>
+      <rect x="36" y="110" width="328" height="40" rx="6" class="svg-group"/>
+      <text x="46" y="127" class="svg-text b small">Roles</text>
+      <text x="46" y="143" class="svg-text xs muted">admin (composite) · agent:report · agent:audit</text>
+      <rect x="36" y="158" width="328" height="40" rx="6" class="svg-group"/>
+      <text x="46" y="175" class="svg-text b small">Clients</text>
+      <text x="46" y="191" class="svg-text xs muted">web-app · report-agent · report-api</text>
+      <rect x="36" y="206" width="328" height="40" rx="6" class="svg-group"/>
+      <text x="46" y="223" class="svg-text b small">Client Scopes · Protocol Mappers</text>
+      <text x="46" y="239" class="svg-text xs muted">roles · audience · department</text>
+      <rect x="36" y="254" width="328" height="40" rx="6" class="svg-group"/>
+      <text x="46" y="271" class="svg-text b small">Keys (JWKS)</text>
+      <text x="46" y="287" class="svg-text xs muted">RS256 · kid 로 키 교체</text>
+      <text x="40" y="318" class="svg-text small muted">엔드포인트 (… = /realms/company)</text>
+      <text x="40" y="342" class="svg-text xs muted">토큰 발급</text>
+      <text x="110" y="342" class="svg-text mono xs">…/protocol/openid-connect/token</text>
+      <text x="40" y="364" class="svg-text xs muted">공개키</text>
+      <text x="110" y="364" class="svg-text mono xs">…/protocol/openid-connect/certs</text>
+      <text x="40" y="386" class="svg-text xs muted">설정 조회</text>
+      <text x="110" y="386" class="svg-text mono xs">…/.well-known/openid-configuration</text>
+
+      <!-- 사용자 -->
+      <rect x="540" y="30" width="180" height="50" rx="10" class="svg-user"/>
+      <text x="630" y="60" text-anchor="middle" class="svg-text b">사용자 (kim)</text>
+      <path d="M630,80 L630,170" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="642" y="130" class="svg-text small muted">브라우저로 접속</text>
+
+      <!-- 업무 앱 -->
+      <rect x="520" y="170" width="220" height="56" rx="10" class="svg-app"/>
+      <text x="630" y="193" text-anchor="middle" class="svg-text b">업무 앱 (Spring)</text>
+      <text x="630" y="213" text-anchor="middle" class="svg-text xs muted">web-app · Authorization Code</text>
+      <path d="M520,186 L380,186" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="450" y="178" text-anchor="middle" class="svg-text small">① 토큰 요청</text>
+      <path d="M380,212 L520,212" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="450" y="230" text-anchor="middle" class="svg-text small token">② JWT 발급</text>
+
+      <!-- 에이전트 -->
+      <rect x="520" y="330" width="220" height="56" rx="10" class="svg-agent"/>
+      <text x="630" y="353" text-anchor="middle" class="svg-text b">AI 에이전트</text>
+      <text x="630" y="373" text-anchor="middle" class="svg-text xs muted">report-agent · client_credentials</text>
+      <path d="M520,346 L380,346" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="450" y="338" text-anchor="middle" class="svg-text small">① 토큰 요청</text>
+      <path d="M380,372 L520,372" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="450" y="390" text-anchor="middle" class="svg-text small token">② JWT 발급</text>
+
+      <!-- 업무 API -->
+      <rect x="900" y="240" width="216" height="56" rx="10" class="svg-app"/>
+      <text x="1008" y="263" text-anchor="middle" class="svg-text b">업무 API</text>
+      <text x="1008" y="283" text-anchor="middle" class="svg-text xs muted">report-api · Resource Server</text>
+      <path d="M740,198 L900,258" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="790" y="208" class="svg-text small">③ Bearer JWT 호출</text>
+      <path d="M740,358 L900,282" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="790" y="354" class="svg-text small">③ Bearer JWT 호출</text>
+
+      <!-- 공개키 조회 -->
+      <path d="M1008,296 L1008,446 L200,446 L200,418" class="svg-line dashed muted" marker-end="url(#arrow-muted)"/>
+      <text x="604" y="438" text-anchor="middle" class="svg-text small muted">④ 공개키(JWKS) 조회 — 서명 검증용. 캐시해 두고 요청마다 부르지 않는다</text>
+    </svg>
+    <figcaption>파란색 = Keycloak, 노란색 = 토큰이 움직이는 경로, 보라색 = 에이전트. 사람(①②)과 에이전트(①②)의 토큰 요청 방식이 다르고, API는 둘 다 같은 방법(③)으로 검증한다.</figcaption>
+  </figure>
+  <aside class="notes">realm 상자 안의 다섯 줄이 오늘 배울 객체 전부다. 앱과 에이전트의 차이는 "토큰을 어떻게 받느냐"뿐이고, API 입장에서는 똑같은 JWT다. ④ 공개키는 시작 시 한 번 받아 캐시한다는 점을 강조.</aside>
+</section>
+
+<!-- 6. 섹션 -->
+<section class="slide section">
+  <div class="num">02</div>
+  <h2>핵심 개념</h2>
+  <p>Realm → Client → User · Role → Scope · Mapper → 토큰. 설정 화면의 메뉴 순서와 같다.</p>
+</section>
+
+<!-- 7. 객체 지도 + Realm -->
+<section class="slide">
+  <h2>핵심 객체 지도 — 모든 것은 Realm 안에 있다</h2>
+  <div class="cols w-1-2 middle">
+    <div>
+      <h3>Realm (렐름)</h3>
+      <ul>
+        <li>사용자·클라이언트·역할의 <strong>격리 단위</strong>. realm이 다르면 서로 보이지 않는다</li>
+        <li><code>company-dev</code>, <code>company-prod</code>처럼 환경별로 분리</li>
+        <li><strong><code>master</code> realm은 관리 전용</strong> — 여기에 앱을 등록하지 않는다</li>
+        <li>URL에 그대로 드러난다: <code>/realms/company/…</code></li>
+      </ul>
+      <div class="card note">
+        <p class="small">관리 콘솔: 왼쪽 위 realm 선택 → 왼쪽 메뉴가 오른쪽 그림의 상자들이다.</p>
+      </div>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 740 420" role="img" aria-label="Realm company 상자 안에 Users·Groups, Roles, Clients, Client Scopes·Mappers, Identity Providers, User Federation 여섯 상자가 들어 있다">
+        <rect x="6" y="6" width="728" height="408" rx="14" class="svg-idp"/>
+        <text x="26" y="36" class="svg-text b lg">Realm: company</text>
+        <text x="714" y="36" text-anchor="end" class="svg-text small muted">모든 객체는 realm 안에 산다</text>
+
+        <rect x="26" y="56" width="216" height="150" rx="10" class="svg-app"/>
+        <text x="40" y="82" class="svg-text b">Users · Groups</text>
+        <text x="40" y="108" class="svg-text small muted">사람 계정, 조직 단위</text>
+        <text x="40" y="128" class="svg-text small muted">service account 도 여기</text>
+        <text x="40" y="148" class="svg-text small muted">LDAP/AD 동기화 가능</text>
+
+        <rect x="262" y="56" width="216" height="150" rx="10" class="svg-app"/>
+        <text x="276" y="82" class="svg-text b">Roles</text>
+        <text x="276" y="108" class="svg-text small muted">realm role / client role</text>
+        <text x="276" y="128" class="svg-text small muted">composite = 역할 묶음</text>
+        <text x="276" y="148" class="svg-text small muted">→ 토큰의 roles 클레임</text>
+
+        <rect x="498" y="56" width="216" height="150" rx="10" class="svg-app"/>
+        <text x="512" y="82" class="svg-text b">Clients</text>
+        <text x="512" y="108" class="svg-text small muted">등록된 앱·에이전트·API</text>
+        <text x="512" y="128" class="svg-text small muted">client_id (+ secret)</text>
+        <text x="512" y="148" class="svg-text small muted">redirect URI, 허용 플로우</text>
+
+        <rect x="26" y="236" width="216" height="150" rx="10" class="svg-app"/>
+        <text x="40" y="262" class="svg-text b">Client Scopes·Mappers</text>
+        <text x="40" y="288" class="svg-text small muted">토큰에 넣을 클레임 정의</text>
+        <text x="40" y="308" class="svg-text small muted">roles, email, audience …</text>
+        <text x="40" y="328" class="svg-text small muted">요청의 scope 로 선택</text>
+
+        <rect x="262" y="236" width="216" height="150" rx="10" class="svg-app"/>
+        <text x="276" y="262" class="svg-text b">Identity Providers</text>
+        <text x="276" y="288" class="svg-text small muted">외부 로그인 브로커</text>
+        <text x="276" y="308" class="svg-text small muted">Google, GitHub,</text>
+        <text x="276" y="328" class="svg-text small muted">타사 OIDC / SAML IdP</text>
+
+        <rect x="498" y="236" width="216" height="150" rx="10" class="svg-app"/>
+        <text x="512" y="262" class="svg-text b">User Federation</text>
+        <text x="512" y="288" class="svg-text small muted">사내 LDAP / AD 연결</text>
+        <text x="512" y="308" class="svg-text small muted">비밀번호 검증은 그쪽에서</text>
+        <text x="512" y="328" class="svg-text small muted">사용자 목록 가져오기</text>
+      </svg>
+      <figcaption>오늘은 윗줄(Users · Roles · Clients)과 Client Scopes를 다룬다. 아랫줄 둘은 "외부 계정을 어떻게 들여오나"의 문제다.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 8. Client -->
+<section class="slide">
+  <h2>Client — Keycloak에 등록된 앱·에이전트·API</h2>
+  <table class="compact">
+    <thead><tr><th style="width:26%">설정 (관리 콘솔)</th><th style="width:40%">의미</th><th>켜는 경우</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Client authentication</strong> ON</td><td><em>confidential</em> client. secret을 안전하게 보관할 수 있는 쪽</td><td>서버 앱, 에이전트, BFF</td></tr>
+      <tr><td>Client authentication OFF</td><td><em>public</em> client. secret 없음, PKCE 필수</td><td>SPA, 모바일 앱</td></tr>
+      <tr><td><strong>Standard flow</strong></td><td>Authorization Code 흐름 = 사람이 로그인</td><td>사용자가 있는 앱</td></tr>
+      <tr><td><strong>Service accounts roles</strong></td><td>client credentials = client 자신의 자격으로 토큰</td><td>에이전트, 배치, 서버 간 호출</td></tr>
+      <tr><td>Direct access grants</td><td>앱이 아이디/비밀번호를 직접 받아 전달 (ROPC)</td><td class="bad">비권장 — OAuth 2.1에서 제거</td></tr>
+      <tr><td><strong>Valid redirect URIs</strong></td><td>code를 돌려줄 주소 화이트리스트</td><td>Standard flow 쓰는 모든 client</td></tr>
+    </tbody>
+  </table>
+  <div class="cols mt">
+    <div class="card warn">
+      <h3>redirect URI를 꼭 등록하는 이유</h3>
+      <p>등록하지 않으면 공격자가 <code>redirect_uri=https://evil.com</code>으로 로그인 요청을 만들어 <strong>code를 가로챌 수 있다</strong>. 와일드카드(<code>*</code>)도 피한다.</p>
+    </div>
+    <div class="card note">
+      <h3>오늘 만들 client 세 개</h3>
+      <p><code>web-app</code> (Standard flow) · <code>report-agent</code> (Service accounts) · <code>report-api</code> (토큰 검증만 — 플로우 전부 OFF, <code>aud</code> 이름과 client role 보관용)</p>
+    </div>
+  </div>
+</section>
+
+
+<!-- 9. User / Service Account -->
+<section class="slide">
+  <h2>User vs Service Account — 사람과 프로그램은 토큰을 다르게 받는다</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 300" role="img" aria-label="가운데 Keycloak을 두고 왼쪽 사용자 kim은 브라우저 로그인으로, 오른쪽 AI 에이전트는 client_id와 secret으로 각각 JWT를 받는다. 아래에는 두 토큰의 payload 차이가 있다">
+      <rect x="468" y="96" width="200" height="90" rx="12" class="svg-idp"/>
+      <text x="568" y="134" text-anchor="middle" class="svg-text b lg">Keycloak</text>
+      <text x="568" y="158" text-anchor="middle" class="svg-text xs muted">…/openid-connect/token</text>
+
+      <rect x="30" y="110" width="180" height="56" rx="10" class="svg-user"/>
+      <text x="120" y="133" text-anchor="middle" class="svg-text b">사용자 kim</text>
+      <text x="120" y="153" text-anchor="middle" class="svg-text xs muted">브라우저에서 로그인</text>
+      <path d="M210,126 L468,126" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="339" y="118" text-anchor="middle" class="svg-text small">① 로그인 (Authorization Code)</text>
+      <path d="M468,156 L218,156" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="339" y="176" text-anchor="middle" class="svg-text small token">② JWT · sub = kim</text>
+
+      <rect x="926" y="110" width="180" height="56" rx="10" class="svg-agent"/>
+      <text x="1016" y="133" text-anchor="middle" class="svg-text b">AI 에이전트</text>
+      <text x="1016" y="153" text-anchor="middle" class="svg-text xs muted">client: report-agent</text>
+      <path d="M926,126 L668,126" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="797" y="118" text-anchor="middle" class="svg-text small">① client_id + secret</text>
+      <path d="M668,156 L918,156" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="797" y="176" text-anchor="middle" class="svg-text small token">② JWT · sub = service account</text>
+
+      <text x="42" y="204" class="svg-text xs muted">발급된 토큰 (payload 일부)</text>
+      <rect x="30" y="210" width="400" height="82" rx="8" class="svg-token"/>
+      <text x="42" y="230" class="svg-text mono xs">"sub": "c1a9…",  "preferred_username": "kim"</text>
+      <text x="42" y="248" class="svg-text mono xs">"azp": "web-app",  "aud": ["report-api"]</text>
+      <text x="42" y="266" class="svg-text mono xs">"realm_access": { "roles": ["agent:report"] }</text>
+      <text x="42" y="284" class="svg-text xs muted">사람의 역할 · 사람이 누구인지 들어 있다</text>
+
+      <text x="718" y="204" class="svg-text xs muted">발급된 토큰 (payload 일부)</text>
+      <rect x="706" y="210" width="400" height="82" rx="8" class="svg-token"/>
+      <text x="718" y="230" class="svg-text mono xs">"sub": "7f3c…",  "preferred_username":</text>
+      <text x="718" y="248" class="svg-text mono xs">&#160;&#160;&#160;&#160;"service-account-report-agent",  "azp": "report-agent"</text>
+      <text x="718" y="266" class="svg-text mono xs">"realm_access": { "roles": ["agent:report"] }</text>
+      <text x="718" y="284" class="svg-text xs muted">에이전트 자신의 역할 · 누구를 대신하는지는 없다 (→ 4회차)</text>
+    </svg>
+    <figcaption>Service accounts를 켜면 Keycloak이 <code>service-account-&lt;client_id&gt;</code>라는 숨은 사용자를 만들고, 그 사용자에게 역할을 매핑한다. 에이전트 토큰의 <code>sub</code>는 이 숨은 사용자다.</figcaption>
+  </figure>
+</section>
+
+<!-- 10. Role -->
+<section class="slide">
+  <h2>Role — 정의한 역할은 토큰의 두 자리에 들어간다</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 360" role="img" aria-label="왼쪽 Keycloak 상자의 Realm roles와 Client roles, 사용자 매핑이 오른쪽 JWT payload의 realm_access.roles와 resource_access.report-api.roles로 복사된다">
+      <rect x="20" y="16" width="480" height="330" rx="14" class="svg-idp"/>
+      <text x="260" y="44" text-anchor="middle" class="svg-text b lg">Keycloak — 역할 정의와 매핑</text>
+
+      <rect x="40" y="64" width="440" height="88" rx="8" class="svg-group"/>
+      <text x="52" y="86" class="svg-text b small">Realm roles</text>
+      <text x="52" y="110" class="svg-text mono xs">admin (composite)  ·  agent:report  ·  agent:audit</text>
+      <text x="52" y="134" class="svg-text xs muted">realm 전체에서 통용 · composite 는 다른 역할들의 묶음</text>
+
+      <rect x="40" y="164" width="440" height="74" rx="8" class="svg-group"/>
+      <text x="52" y="186" class="svg-text b small">Client roles · report-api</text>
+      <text x="52" y="210" class="svg-text mono xs">report-writer  ·  report-reader</text>
+      <text x="52" y="228" class="svg-text xs muted">그 client(API) 안에서만 의미</text>
+
+      <rect x="40" y="250" width="440" height="86" rx="8" class="svg-group"/>
+      <text x="52" y="272" class="svg-text b small">사용자 kim 의 매핑</text>
+      <text x="52" y="296" class="svg-text small">admin (→ 펼침: agent:report, agent:audit) · report-api/report-writer</text>
+      <text x="52" y="318" class="svg-text xs muted">그룹 소속 역할도 합쳐진다. 토큰에는 "펼쳐진 최종 역할"만 들어간다</text>
+
+      <rect x="600" y="16" width="516" height="330" rx="14" class="svg-token"/>
+      <text x="858" y="44" text-anchor="middle" class="svg-text b lg token">access token payload (일부)</text>
+      <text x="620" y="84" class="svg-text mono">"realm_access": {</text>
+      <text x="620" y="108" class="svg-text mono">&#160;&#160;"roles": ["admin", "agent:report", "agent:audit"]</text>
+      <text x="620" y="132" class="svg-text mono">},</text>
+      <text x="620" y="156" class="svg-text mono">"resource_access": {</text>
+      <text x="620" y="180" class="svg-text mono">&#160;&#160;"report-api": { "roles": ["report-writer"] }</text>
+      <text x="620" y="204" class="svg-text mono">},</text>
+      <text x="620" y="228" class="svg-text mono">"preferred_username": "kim"</text>
+      <text x="620" y="268" class="svg-text xs muted">Spring 은 "ROLE_" 접두어를 붙여 권한으로 바꾼다 (19장)</text>
+      <text x="620" y="290" class="svg-text mono xs">hasRole('agent:report')   ← realm_access.roles</text>
+      <text x="620" y="312" class="svg-text mono xs">hasRole('report-writer')  ← resource_access.report-api.roles</text>
+
+      <path d="M480,108 L600,108" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="540" y="100" text-anchor="middle" class="svg-text xs">realm role</text>
+      <path d="M480,200 L600,178" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="540" y="180" text-anchor="middle" class="svg-text xs">client role</text>
+    </svg>
+    <figcaption>역할은 Keycloak DB에 저장되고, 토큰을 발급하는 순간 <code>roles</code> client scope의 매퍼가 두 클레임으로 복사한다. 요청 본문이나 설정 파일로 오는 값이 아니다.</figcaption>
+  </figure>
+  <aside class="notes">"Role이 어디서 오느냐"에 대한 답. 관리자가 Keycloak에 저장 → 발급 시 JWT에 복사 → Bearer 헤더로 API에 도착. 코드나 config에는 없다. composite는 펼쳐져서 들어간다는 점, client role은 resource_access 아래 client 이름으로 묶인다는 점을 짚는다.</aside>
+</section>
+
+<!-- 11. Group / Composite -->
+<section class="slide">
+  <h2>Group과 Composite — 권한은 기능 단위로, 묶음은 설정으로</h2>
+  <div class="cols middle">
+    <div>
+      <ul>
+        <li><strong>Group</strong>: 조직 단위. 그룹에 역할을 매핑하면 소속 사용자가 모두 상속</li>
+        <li><strong>Composite role</strong>: 역할을 묶은 역할. <code>admin</code> = <code>agent:report</code> + <code>agent:audit</code> + …</li>
+        <li>토큰에는 둘 다 <strong>펼쳐진 최종 역할</strong>만 들어간다</li>
+      </ul>
+      <div class="card ok">
+        <h3>권장 설계</h3>
+        <p>코드는 <code>hasRole('agent:audit')</code>처럼 <strong>기능 단위 역할</strong>만 본다. "admin도 쓰게 해 달라", "user도 audit 에이전트 허용"은 <strong>Keycloak 설정 변경</strong>으로 끝난다 — 배포 없음.</p>
+      </div>
+      <div class="card bad">
+        <p class="small"><code>if (roles.contains("admin"))</code>처럼 사람 등급을 코드에 박으면 정책이 바뀔 때마다 배포해야 한다.</p>
+      </div>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 560 300" role="img" aria-label="사용자 kim이 그룹 영업팀 소속으로 agent:report를, 직접 매핑된 composite admin에서 agent:report, agent:audit, user:manage를 상속받는다">
+        <rect x="20" y="118" width="150" height="54" rx="10" class="svg-user"/>
+        <text x="95" y="150" text-anchor="middle" class="svg-text b">사용자 kim</text>
+
+        <rect x="230" y="30" width="170" height="54" rx="10" class="svg-group"/>
+        <text x="315" y="54" text-anchor="middle" class="svg-text b small">그룹: 영업팀</text>
+        <text x="315" y="72" text-anchor="middle" class="svg-text xs muted">그룹에 역할 매핑</text>
+
+        <rect x="230" y="206" width="170" height="54" rx="10" class="svg-idp"/>
+        <text x="315" y="230" text-anchor="middle" class="svg-text b small">admin (composite)</text>
+        <text x="315" y="248" text-anchor="middle" class="svg-text xs muted">사용자에 직접 매핑</text>
+
+        <rect x="440" y="30" width="110" height="54" rx="8" class="svg-token"/>
+        <text x="495" y="62" text-anchor="middle" class="svg-text mono xs">agent:report</text>
+
+        <rect x="440" y="176" width="110" height="114" rx="8" class="svg-token"/>
+        <text x="495" y="206" text-anchor="middle" class="svg-text mono xs">agent:report</text>
+        <text x="495" y="232" text-anchor="middle" class="svg-text mono xs">agent:audit</text>
+        <text x="495" y="258" text-anchor="middle" class="svg-text mono xs">user:manage</text>
+
+        <path d="M170,138 L230,68" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="178" y="96" class="svg-text xs">소속</text>
+        <path d="M170,152 L230,224" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="178" y="202" class="svg-text xs">직접</text>
+        <path d="M400,57 L440,57" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="420" y="48" text-anchor="middle" class="svg-text xs">매핑</text>
+        <path d="M400,233 L440,233" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="420" y="224" text-anchor="middle" class="svg-text xs">펼침</text>
+      </svg>
+      <figcaption>kim의 토큰 <code>realm_access.roles</code> = admin, agent:report, agent:audit, user:manage (중복 제거).</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 12. Scope & Mapper -->
+<section class="slide">
+  <h2>Client Scope와 Protocol Mapper — "토큰에 무엇을 넣을지"</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 272" role="img" aria-label="관리자 설정이 Keycloak DB에 저장되고, 토큰 요청 시 Client Scope의 Protocol Mapper가 역할과 속성을 JWT 클레임으로 변환한다">
+      <rect x="6" y="40" width="170" height="220" rx="12" class="svg-user"/>
+      <text x="91" y="70" text-anchor="middle" class="svg-text b">관리자 설정</text>
+      <text x="22" y="104" class="svg-text small muted">역할 생성</text>
+      <text x="22" y="128" class="svg-text small muted">사용자·그룹 매핑</text>
+      <text x="22" y="152" class="svg-text small muted">client 등록</text>
+      <text x="22" y="176" class="svg-text small muted">scope에 매퍼 추가</text>
+      <text x="22" y="200" class="svg-text small muted">사용자 속성 입력</text>
+
+      <path d="M176,150 L246,150" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="211" y="140" text-anchor="middle" class="svg-text xs">① 저장</text>
+
+      <rect x="246" y="40" width="230" height="220" rx="12" class="svg-idp"/>
+      <text x="361" y="70" text-anchor="middle" class="svg-text b">Keycloak DB</text>
+      <text x="262" y="104" class="svg-text small muted">역할 정의 · composite</text>
+      <text x="262" y="128" class="svg-text small muted">사용자·클라이언트 매핑</text>
+      <text x="262" y="152" class="svg-text small muted">client scope · 매퍼 설정</text>
+      <text x="262" y="176" class="svg-text small muted">사용자 속성 (department)</text>
+      <text x="262" y="224" class="svg-text xs muted">토큰 요청이 올 때 조회된다</text>
+
+      <path d="M476,150 L546,150" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="511" y="140" text-anchor="middle" class="svg-text xs">② 조회</text>
+
+      <rect x="546" y="40" width="260" height="220" rx="12" class="svg-idp"/>
+      <text x="676" y="66" text-anchor="middle" class="svg-text b">Client Scope</text>
+      <text x="676" y="86" text-anchor="middle" class="svg-text b">→ Protocol Mapper</text>
+      <text x="562" y="118" class="svg-text mono xs">roles       → realm_access</text>
+      <text x="562" y="140" class="svg-text mono xs">audience    → aud: report-api</text>
+      <text x="562" y="162" class="svg-text mono xs">user attr   → department</text>
+      <text x="562" y="184" class="svg-text mono xs">email       → email</text>
+      <text x="562" y="224" class="svg-text xs muted">client 기본 scope + 요청의 scope 로 선택</text>
+
+      <path d="M806,150 L876,150" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="841" y="140" text-anchor="middle" class="svg-text xs token">③ 변환</text>
+
+      <rect x="876" y="40" width="254" height="220" rx="12" class="svg-token"/>
+      <text x="1003" y="70" text-anchor="middle" class="svg-text b token">발급된 JWT payload</text>
+      <text x="892" y="104" class="svg-text mono xs">"aud": ["report-api"]</text>
+      <text x="892" y="126" class="svg-text mono xs">"realm_access": {"roles": […]}</text>
+      <text x="892" y="148" class="svg-text mono xs">"department": "DS"</text>
+      <text x="892" y="170" class="svg-text mono xs">"email": "kim@company.com"</text>
+      <text x="892" y="192" class="svg-text mono xs">"scope": "openid report:write"</text>
+      <text x="892" y="224" class="svg-text xs muted">여기 없는 값은 API 도 모른다</text>
+    </svg>
+    <figcaption>매퍼(Mapper)는 "DB의 어떤 값을 토큰의 어떤 클레임으로 넣을지"를 정하는 규칙이다. 기본 scope <code>profile</code>, <code>email</code>, <code>roles</code>, <code>web-origins</code>가 자동으로 붙는다.</figcaption>
+  </figure>
+  <div class="cols mt">
+    <div class="card warn">
+      <h3>Audience 매퍼는 직접 추가해야 한다</h3>
+      <p class="small">Keycloak 기본 access token의 <code>aud</code>에는 호출 대상 API가 없다(보통 <code>account</code>만). <code>report-api</code>를 넣으려면 client의 dedicated scope에 <strong>Audience</strong> 매퍼를 추가한다. 이게 없으면 20장의 <code>aud</code> 검증이 항상 실패한다.</p>
+    </div>
+    <div class="card note">
+      <h3>커스텀 클레임</h3>
+      <p class="small">부서, 사번 같은 값은 User Attribute 매퍼로 넣는다. 단, 토큰은 누구나 디코딩할 수 있으니 <strong>민감 정보는 넣지 않는다</strong>.</p>
+    </div>
+  </div>
+  <aside class="notes">실습에서 가장 많이 막히는 지점이 aud다. Spring에서 audience 검증을 켰는데 403/401이 나면 십중팔구 Audience 매퍼 누락. 토큰을 디코딩해서 aud 배열을 보여 주며 설명.</aside>
+</section>
+
+<!-- 13. 발급 두 경로 -->
+<section class="slide">
+  <h2>토큰 발급 두 경로 — 사람은 code로, 에이전트는 자격으로</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 420" role="img" aria-label="브라우저, 업무 앱, Keycloak, 에이전트 네 생명선. 위쪽은 사용자의 Authorization Code 흐름 여섯 단계, 아래쪽은 에이전트의 client credentials 두 단계">
+      <rect x="10" y="10" width="180" height="40" rx="8" class="svg-user"/>
+      <text x="100" y="36" text-anchor="middle" class="svg-text b">브라우저</text>
+      <rect x="290" y="10" width="180" height="40" rx="8" class="svg-app"/>
+      <text x="380" y="36" text-anchor="middle" class="svg-text b">업무 앱 (web-app)</text>
+      <rect x="570" y="10" width="180" height="40" rx="8" class="svg-idp"/>
+      <text x="660" y="36" text-anchor="middle" class="svg-text b">Keycloak</text>
+      <rect x="890" y="10" width="180" height="40" rx="8" class="svg-agent"/>
+      <text x="980" y="36" text-anchor="middle" class="svg-text b">에이전트 (report-agent)</text>
+      <line x1="100" y1="50" x2="100" y2="300" class="svg-lifeline"/>
+      <line x1="380" y1="50" x2="380" y2="300" class="svg-lifeline"/>
+      <line x1="660" y1="50" x2="660" y2="405" class="svg-lifeline"/>
+      <line x1="980" y1="50" x2="980" y2="405" class="svg-lifeline"/>
+
+      <path d="M100,90 L372,90" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="240" y="82" text-anchor="middle" class="svg-text small">① GET /reports (세션 없음)</text>
+      <path d="M380,126 L108,126" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="240" y="118" text-anchor="middle" class="svg-text small">② 302 → Keycloak 로그인 주소</text>
+      <path d="M100,162 L652,162" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="376" y="154" text-anchor="middle" class="svg-text small">③ 로그인 화면 → 아이디/비밀번호 (이미 SSO 세션이 있으면 생략)</text>
+      <path d="M660,198 L108,198" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="384" y="190" text-anchor="middle" class="svg-text small">④ 302 → /login/oauth2/code/keycloak?code=…</text>
+      <path d="M380,236 L652,236" class="svg-line idp" marker-end="url(#arrow-idp)"/>
+      <text x="516" y="228" text-anchor="middle" class="svg-text small idp">⑤ POST /token · code + client_secret (백 채널)</text>
+      <path d="M660,272 L388,272" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="524" y="264" text-anchor="middle" class="svg-text small token">⑥ access · ID · refresh token</text>
+
+      <line x1="40" y1="312" x2="1096" y2="312" class="svg-line dashed muted"/>
+      <text x="568" y="306" text-anchor="middle" class="svg-text xs muted">에이전트 — 사람 없이, 자기 자격으로</text>
+
+      <path d="M980,346 L668,346" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="820" y="338" text-anchor="middle" class="svg-text small">⑦ POST /token · client_credentials + secret</text>
+      <path d="M660,384 L972,384" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="816" y="376" text-anchor="middle" class="svg-text small token">⑧ access token (sub = service account)</text>
+    </svg>
+    <figcaption>두 경로 모두 같은 엔드포인트 <code>…/protocol/openid-connect/token</code>을 쓴다. 다른 것은 <code>grant_type</code>(authorization_code vs client_credentials)과 "사람이 있느냐"뿐이다.</figcaption>
+  </figure>
+</section>
+
+<!-- 14. 토큰 payload -->
+<section class="slide">
+  <h2>실제 access token — 각 필드는 어디서 왔나</h2>
+  <div class="cols w-1-1">
+    <div>
+      <p class="code-title">report-agent 가 받은 access token payload</p>
+<pre class="small"><code class="lang-json">{
+  "exp": 1760000300,
+  "iat": 1760000000,
+  "iss": "https://kc.company.com/realms/company",
+  "aud": ["report-api", "account"],
+  "sub": "7f3c2a1e-….",
+  "typ": "Bearer",
+  "azp": "report-agent",
+  "scope": "openid report:write",
+  "realm_access": { "roles": ["agent:report"] },
+  "resource_access": {
+    "report-api": { "roles": ["report-writer"] }
+  },
+  "preferred_username": "service-account-report-agent"
+}</code></pre>
+    </div>
+    <table class="compact">
+      <thead><tr><th style="width:38%">필드</th><th>출처 (Keycloak 설정)</th></tr></thead>
+      <tbody>
+        <tr><td><code>exp</code> / <code>iat</code></td><td>Realm settings → Tokens → Access Token Lifespan (기본 5분)</td></tr>
+        <tr><td><code>iss</code></td><td>realm URL. Spring은 <code>issuer-uri</code>와 비교</td></tr>
+        <tr><td><code>aud</code></td><td><strong>Audience 매퍼</strong>. <code>account</code>는 기본 roles 매퍼가 넣음</td></tr>
+        <tr><td><code>sub</code></td><td>사용자(또는 service account 사용자)의 내부 ID</td></tr>
+        <tr><td><code>azp</code></td><td>토큰을 <strong>요청한 client_id</strong> — "누가 불렀나"</td></tr>
+        <tr><td><code>scope</code></td><td>요청 scope ∩ client에 허용된 client scope</td></tr>
+        <tr><td><code>realm_access</code> / <code>resource_access</code></td><td>역할 매핑 + composite 펼침 (roles 매퍼)</td></tr>
+        <tr><td><code>preferred_username</code></td><td>profile scope의 username 매퍼</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 15. 토큰 검증 -->
+<section class="slide">
+  <h2>토큰 검증 — 공개키는 한 번 받고, 요청마다는 로컬에서</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 340" role="img" aria-label="업무 API가 시작 시 Keycloak의 discovery 문서와 JWKS 공개키를 받아 캐시하고, 이후 요청마다 네트워크 없이 서명·exp·iss·aud·roles를 검증한다">
+      <rect x="60" y="10" width="200" height="40" rx="8" class="svg-app"/>
+      <text x="160" y="36" text-anchor="middle" class="svg-text b">업무 API (Spring)</text>
+      <rect x="876" y="10" width="200" height="40" rx="8" class="svg-idp"/>
+      <text x="976" y="36" text-anchor="middle" class="svg-text b">Keycloak</text>
+      <line x1="160" y1="50" x2="160" y2="330" class="svg-lifeline"/>
+      <line x1="976" y1="50" x2="976" y2="330" class="svg-lifeline"/>
+
+      <path d="M160,92 L968,92" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="568" y="84" text-anchor="middle" class="svg-text small">① GET /realms/company/.well-known/openid-configuration  (앱 시작 시 1회)</text>
+      <path d="M976,128 L168,128" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="568" y="120" text-anchor="middle" class="svg-text small">② issuer, jwks_uri, token_endpoint … (메타데이터)</text>
+      <path d="M160,164 L968,164" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="568" y="156" text-anchor="middle" class="svg-text small">③ GET …/protocol/openid-connect/certs</text>
+      <path d="M976,200 L168,200" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="568" y="192" text-anchor="middle" class="svg-text small token">④ 공개키 목록 { kid, kty: RSA, n, e } → 메모리에 캐시</text>
+      <path d="M160,248 L968,248" class="svg-line dashed muted" marker-end="url(#arrow-muted)"/>
+      <text x="568" y="240" text-anchor="middle" class="svg-text small muted">⑤ 모르는 kid 를 가진 토큰이 오면 certs 재조회 (키 교체 대응)</text>
+
+      <rect x="40" y="272" width="620" height="52" rx="8" class="svg-ok-box"/>
+      <text x="54" y="292" class="svg-text small b ok">요청마다 — 네트워크 없이 로컬에서</text>
+      <text x="54" y="312" class="svg-text small">서명(공개키) → exp → iss → aud → roles / scope → 허용 또는 401/403</text>
+      <rect x="684" y="272" width="412" height="52" rx="8" class="svg-group"/>
+      <text x="698" y="292" class="svg-text small b">Keycloak은 요청당 호출되지 않는다</text>
+      <text x="698" y="312" class="svg-text xs muted">API를 수평 확장해도 Keycloak 부하가 늘지 않는다 (stateless)</text>
+    </svg>
+    <figcaption>①~④는 Spring Security가 <code>issuer-uri</code> 하나로 자동 수행한다. 토큰 폐기를 즉시 반영하고 싶다면 수명을 짧게 두는 것이 정석이다(introspection은 예외적).</figcaption>
+  </figure>
+</section>
+
+
+<!-- 16. 섹션 -->
+<section class="slide section">
+  <div class="num">03</div>
+  <h2>Spring으로 붙이기</h2>
+  <p>API 쪽 = Resource Server (토큰 검증) · 에이전트 쪽 = OAuth2 Client (토큰 획득)</p>
+</section>
+
+<!-- 17. 의존성 + yml -->
+<section class="slide">
+  <h2>Resource Server — 설정은 issuer-uri 한 줄부터</h2>
+  <div class="cols w-3-2">
+    <div class="stack">
+      <div>
+        <p class="code-title">build.gradle</p>
+<pre class="small" style="font-size:13.5px"><code>implementation(
+    'org.springframework.boot:spring-boot-starter-oauth2-resource-server')</code></pre>
+      </div>
+      <div>
+        <p class="code-title">application.yml</p>
+<pre><code class="lang-yaml">spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://kc.company.com/realms/company
+          # 선택: aud 검사를 속성 한 줄로 (Spring Boot 3.1+)
+          # 20장의 검증기와 같은 효과. 원리를 알고 쓰자
+          audiences: report-api</code></pre>
+      </div>
+    </div>
+    <div class="stack">
+      <div class="card ok">
+        <h3>issuer-uri 하나로 자동</h3>
+        <ul class="small">
+          <li>discovery 문서 → <code>jwks_uri</code> → 공개키 캐시</li>
+          <li>요청마다 서명 · <code>exp</code> · <code>iss</code> 검증</li>
+          <li>실패하면 Controller 전에 <strong>401</strong></li>
+        </ul>
+      </div>
+      <div class="card warn">
+        <h3>자동으로 안 되는 것</h3>
+        <ul class="small">
+          <li><code>aud</code> 검증 (기본 OFF) → 20장</li>
+          <li>Keycloak roles → Spring 권한 변환 → 19장</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 18. SecurityConfig -->
+<section class="slide">
+  <h2>SecurityConfig — Controller 앞, 필터 체인에서 끝낸다</h2>
+  <div class="cols w-3-2">
+    <div>
+      <p class="code-title">SecurityConfig.java</p>
+<pre class="small"><code class="lang-java">@Configuration
+@EnableMethodSecurity            // @PreAuthorize 활성화 (없으면 조용히 무시)
+public class SecurityConfig {
+
+    @Bean
+    SecurityFilterChain api(HttpSecurity http) throws Exception {
+        http
+            .csrf(csrf -&gt; csrf.disable())         // 순수 Bearer API 일 때만
+            .sessionManagement(s -&gt; s.sessionCreationPolicy(
+                SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(auth -&gt; auth
+                .requestMatchers("/actuator/health").permitAll()
+                .requestMatchers(HttpMethod.POST, "/reports/**")
+                    .hasRole("report-writer")
+                .anyRequest().authenticated())
+            .oauth2ResourceServer(rs -&gt; rs.jwt(jwt -&gt;
+              jwt.jwtAuthenticationConverter(keycloakConverter())));
+        return http.build();
+    }
+}</code></pre>
+    </div>
+    <div class="stack">
+      <div class="card note">
+        <h3>요청이 지나가는 순서</h3>
+        <p class="small">BearerTokenAuthenticationFilter(토큰 추출·검증) → Converter(roles 변환) → AuthorizationFilter(URL 규칙) → Controller → <code>@PreAuthorize</code></p>
+      </div>
+      <div class="card">
+        <h3>401 vs 403</h3>
+        <p class="small"><strong>401</strong> 토큰 없음·서명/만료 실패 · <strong>403</strong> 토큰은 맞지만 역할 부족</p>
+      </div>
+      <div class="card">
+        <p class="small"><code>hasRole("x")</code>는 권한 <code>ROLE_x</code>를 찾는다 → 변환기가 접두어를 붙여야 한다.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">"Controller 앞인가?"라는 질문의 답: Servlet Filter 단계. Controller 코드에서 Authorization 헤더를 직접 파싱하지 않는다. csrf.disable()은 쿠키 세션이 없을 때만 허용되며, 3회차 BFF에서는 다시 켠다.</aside>
+</section>
+
+<!-- 19. roles 변환기 -->
+<section class="slide">
+  <h2>roles 변환기 — Keycloak 클레임을 Spring 권한으로</h2>
+  <div class="cols w-3-2">
+    <div>
+      <p class="code-title">SecurityConfig.java (계속)</p>
+<pre class="small" style="font-size:13.5px;line-height:1.32"><code class="lang-java">private JwtAuthenticationConverter keycloakConverter() {
+    var scopes = new JwtGrantedAuthoritiesConverter();  // scope → SCOPE_x
+    var converter = new JwtAuthenticationConverter();
+    converter.setJwtGrantedAuthoritiesConverter(jwt -&gt; {
+        List&lt;GrantedAuthority&gt; out = new ArrayList&lt;&gt;(scopes.convert(jwt));
+        roles(jwt.getClaimAsMap("realm_access"))      // realm role
+            .forEach(r -&gt; out.add(role(r)));
+        Map&lt;String, Object&gt; res = jwt.getClaimAsMap("resource_access");
+        if (res != null) res.values().forEach(v -&gt;   // client role
+            roles((Map&lt;String, Object&gt;) v).forEach(r -&gt; out.add(role(r))));
+        return out;
+    });
+    return converter;
+}
+
+private static GrantedAuthority role(String r) {
+    return new SimpleGrantedAuthority("ROLE_" + r);
+}
+
+@SuppressWarnings("unchecked")
+private static List&lt;String&gt; roles(Map&lt;String, Object&gt; access) {
+    if (access == null) return List.of();
+    return (List&lt;String&gt;) access.getOrDefault("roles", List.of());
+}</code></pre>
+    </div>
+    <div class="stack">
+      <div class="card note">
+        <h3>왜 필요한가</h3>
+        <p class="small">Spring 기본 변환기는 <code>scope</code> 클레임만 읽는다. Keycloak의 역할은 <code>realm_access.roles</code>에 있으므로 직접 꺼내 <code>ROLE_</code>를 붙인다.</p>
+      </div>
+      <div class="card">
+        <h3>결과 권한 예</h3>
+        <p class="small mono"><code>ROLE_agent:report</code><br><code>ROLE_report-writer</code><br><code>SCOPE_report:write</code></p>
+      </div>
+      <div class="card ok">
+        <p class="small">공통 라이브러리(starter)로 만들어 두면 팀마다 복붙하지 않는다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 20. aud 검증기 -->
+<section class="slide">
+  <h2>aud 검증기 — 다른 서비스용 토큰을 거절한다</h2>
+  <div class="cols w-3-2">
+    <div>
+      <p class="code-title">JwtConfig.java</p>
+<pre class="small" style="font-size:13.5px"><code class="lang-java">@Bean
+JwtDecoder jwtDecoder(OAuth2ResourceServerProperties props) {
+    String issuer = props.getJwt().getIssuerUri();
+    NimbusJwtDecoder decoder = JwtDecoders.fromIssuerLocation(issuer);
+    var withIssuer = JwtValidators.createDefaultWithIssuer(issuer);
+    var audience   = new AudienceValidator("report-api"); // + aud 검사
+    decoder.setJwtValidator(
+        new DelegatingOAuth2TokenValidator&lt;&gt;(withIssuer, audience));
+    return decoder;
+}
+
+static class AudienceValidator implements OAuth2TokenValidator&lt;Jwt&gt; {
+    private final String expected;
+    AudienceValidator(String expected) { this.expected = expected; }
+
+    @Override
+    public OAuth2TokenValidatorResult validate(Jwt jwt) {
+        if (jwt.getAudience().contains(expected))
+            return OAuth2TokenValidatorResult.success();
+        return OAuth2TokenValidatorResult.failure(new OAuth2Error(
+            "invalid_token", "aud 불일치: " + expected, null)); // → 401
+    }
+}</code></pre>
+    </div>
+    <div class="stack">
+      <div class="card bad">
+        <h3>없으면 생기는 일</h3>
+        <p class="small">같은 realm의 <code>search-api</code>용 토큰, 또는 다른 에이전트의 토큰이 <strong>그대로 통과</strong>한다. 서명도 iss도 모두 정상이기 때문이다.</p>
+      </div>
+      <div class="card note">
+        <h3>짝: Audience 매퍼</h3>
+        <p class="small">Keycloak 쪽에서 <code>report-api</code>를 <code>aud</code>에 넣어 주어야(12장) 이 검증을 통과한다.</p>
+      </div>
+      <div class="card">
+        <p class="small">Boot 속성 <code>jwt.audiences</code>는 이 코드의 축약판이다.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">4회차 "aud 불일치 → 거절" 그림의 구현이 바로 이 코드. 토큰이 "어느 API를 위해 발급되었는가"를 API 스스로 확인하는 것이며, 멀티 에이전트에서 토큰을 서로 돌려쓰는 것을 막는 장치다.</aside>
+</section>
+
+<!-- 21. 메서드 보안 -->
+<section class="slide">
+  <h2>메서드 보안 — 역할이 필요한 곳에 어노테이션 한 줄</h2>
+  <div class="cols w-3-2">
+    <div>
+<pre class="small" style="font-size:13.5px"><code class="lang-java">@RestController
+class ReportController {
+    @PostMapping("/reports")
+    ReportDto create(@RequestBody ReportRequest req,
+                     @AuthenticationPrincipal Jwt jwt) {
+        String caller = jwt.getClaimAsString("azp");   // 호출한 client
+        String user   = jwt.getSubject();              // 누구 계정으로
+        return service.create(req, user, caller);
+    }
+}
+
+@Service
+class ReportService {
+    @PreAuthorize("hasRole('agent:report') "
+                + "and hasAuthority('SCOPE_report:write')")
+    public ReportDto create(ReportRequest req,
+                            String user, String caller) {
+        Report r = repo.save(...);
+        audit.log(user, caller, "report.create", r.getId());   // 감사 로그
+        return ReportDto.of(r);
+    }
+}</code></pre>
+    </div>
+    <div class="stack">
+      <div class="card bad">
+        <h3>프록시 함정 3가지</h3>
+        <ul class="small">
+          <li>같은 클래스 안에서 <code>this.create()</code>로 부르면 <strong>검사가 건너뛰어진다</strong></li>
+          <li><code>private</code> 메서드에 붙이면 효과 없음</li>
+          <li><code>@EnableMethodSecurity</code> 누락 → 전부 조용히 무시</li>
+        </ul>
+      </div>
+      <div class="card note">
+        <h3>어노테이션이 못 하는 것</h3>
+        <p class="small">"이 보고서가 kim의 것인가"(데이터 소유) 는 서비스 코드에서 직접 검사한다. 역할만 보면 남의 ID를 넣어 조회하는 IDOR가 뚫린다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- 22. Service Account 만들기 -->
+<section class="slide">
+  <h2>에이전트용 Service Account 만들기 — 콘솔 6단계 + curl</h2>
+  <div class="cols w-2-3">
+    <ol class="steps compact">
+      <li><strong>Clients → Create client</strong> · Client ID <code>report-agent</code> → Next</li>
+      <li>Capability config: <strong>Client authentication ON</strong>, <strong>Service accounts roles ON</strong>, Standard flow OFF → Save</li>
+      <li><strong>Credentials</strong> 탭 → Client secret 복사 → 비밀 저장소(Vault, 환경 변수)에</li>
+      <li><strong>Service accounts roles</strong> 탭 → Assign role → <code>agent:report</code>, <code>report-api / report-writer</code></li>
+      <li><strong>Client scopes</strong> 탭 → <code>report-agent-dedicated</code> → Add mapper → By configuration → <strong>Audience</strong> → Included Client Audience <code>report-api</code>, Add to access token ON</li>
+      <li>curl로 토큰 요청 → payload의 <code>aud</code>, <code>azp</code>, <code>realm_access.roles</code> 확인</li>
+    </ol>
+    <div>
+      <p class="code-title">실습 (Keycloak :8180, API :8080)</p>
+<pre class="small" style="font-size:13.5px"><code class="lang-bash">TOKEN=$(curl -s -X POST \
+  http://localhost:8180/realms/company/protocol/openid-connect/token \
+  -d grant_type=client_credentials \
+  -d client_id=report-agent \
+  -d client_secret="$REPORT_AGENT_SECRET" | jq -r .access_token)
+
+# payload 만 디코딩해서 확인
+# (로컬 실습 토큰만! 운영 토큰을 외부 디코더 사이트에 붙여 넣지 말 것)
+echo "$TOKEN" | cut -d. -f2 | tr '_-' '/+' \
+  | base64 -d 2&gt;/dev/null | jq
+
+# API 호출 → 200. 역할을 빼고 다시 받으면 403, 토큰 없이면 401
+curl -i http://localhost:8080/reports \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"title":"test"}'</code></pre>
+    </div>
+  </div>
+  <aside class="notes">라이브 데모 포인트: 5단계(Audience 매퍼)를 건너뛰고 토큰을 받아 aud가 ["account"]뿐인 것을 보여 준 뒤, 매퍼를 추가하고 다시 받아 report-api가 생기는 것을 비교. 토큰 수명이 5분이라 데모 중 만료될 수 있으니 미리 말해 둔다.</aside>
+</section>
+
+<!-- 23. 에이전트 쪽 Spring -->
+<section class="slide">
+  <h2>에이전트 쪽 Spring — 토큰 획득과 갱신은 OAuth2 Client에 맡긴다</h2>
+  <div class="cols w-2-3">
+    <div>
+      <p class="code-title">application.yml (에이전트)</p>
+<pre class="small" style="font-size:13.5px"><code class="lang-yaml">spring.security.oauth2.client:
+  registration:
+    report-agent:
+      provider: keycloak
+      client-id: report-agent
+      client-secret: ${REPORT_AGENT_SECRET}
+      authorization-grant-type: client_credentials
+      scope: report:write          # client scope
+  provider:
+    keycloak:
+      issuer-uri: ${KC_ISSUER_URI}
+      # = https://kc.company.com/realms/company</code></pre>
+      <p class="small muted mt">의존성: <code>spring-boot-starter-oauth2-client</code></p>
+    </div>
+    <div>
+      <p class="code-title">AgentHttpConfig.java</p>
+<pre class="small" style="font-size:13.5px"><code class="lang-java">@Bean   // Boot 가 자동 구성해 주는 버전이면 생략 가능
+OAuth2AuthorizedClientManager clientManager(
+        ClientRegistrationRepository regs,
+        OAuth2AuthorizedClientService clients) {
+    var manager = new AuthorizedClientServiceOAuth2AuthorizedClientManager(
+        regs, clients);
+    var provider = OAuth2AuthorizedClientProviderBuilder.builder()
+        .clientCredentials().build();
+    manager.setAuthorizedClientProvider(provider);
+    return manager;              // 만료되면 알아서 새 토큰을 받는다
+}
+
+@Bean   // Spring Security 6.4+
+RestClient reportApi(OAuth2AuthorizedClientManager manager) {
+    var oauth2 = new OAuth2ClientHttpRequestInterceptor(manager);
+    oauth2.setClientRegistrationIdResolver(request -&gt; "report-agent");
+    return RestClient.builder()
+        .baseUrl("https://report-api.company.com")
+        .requestInterceptor(oauth2)  // Authorization: Bearer 자동 첨부
+        .build();
+}
+// 6.4 미만: WebClient +
+//   ServletOAuth2AuthorizedClientExchangeFilterFunction</code></pre>
+    </div>
+  </div>
+  <aside class="notes">에이전트 코드에는 토큰 문자열이 등장하지 않는다. 인터셉터가 요청마다 유효한 토큰을 붙이고, 만료 전에 다시 받는다. secret은 환경 변수나 Vault에서만 온다.</aside>
+</section>
+
+<!-- 24. 권한 모델 정리 -->
+<section class="slide">
+  <h2>권한 모델 정리 — 언제 무엇을 쓰나</h2>
+  <table class="compact">
+    <thead><tr><th style="width:17%">모델</th><th style="width:22%">답하는 질문</th><th style="width:25%">Keycloak 설정</th><th style="width:18%">Spring에서</th><th>쓰는 때</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Role</strong> (RBAC)</td><td>이 주체가 무슨 역할인가</td><td>Realm/Client role, composite, 그룹 매핑</td><td><code>hasRole</code>, <code>@PreAuthorize</code></td><td class="ok">대부분. 기능 단위 role로</td></tr>
+      <tr><td><strong>Scope</strong></td><td>이 토큰으로 무엇까지 허용했나</td><td>Client scope(<code>report:write</code>), 요청 scope</td><td><code>hasAuthority('SCOPE_…')</code></td><td>에이전트별 권한 축소 → 4회차</td></tr>
+      <tr><td><strong>Authorization Services</strong></td><td>이 리소스에 이 조건으로 되나</td><td>Resource · Scope · Policy · Permission (UMA 2.0)</td><td>Policy Enforcer 또는 직접 질의</td><td>시간·속성·소유 조건이 많을 때만. 복잡도 큼</td></tr>
+      <tr><td><strong>데이터 소유 검사</strong></td><td>이 보고서가 kim의 것인가</td><td>(Keycloak 밖)</td><td>서비스 코드에서 직접</td><td class="ok">항상. 역할만으론 못 막는다</td></tr>
+    </tbody>
+  </table>
+  <div class="cols mt">
+    <div class="card note">
+      <h3>이 시리즈의 선택</h3>
+      <p class="small">Role로 "누가 어떤 에이전트를 쓸 수 있나", Scope + aud로 "에이전트가 어떤 API를 어디까지", 코드로 "이 데이터가 그 사람 것인가".</p>
+    </div>
+    <div class="card">
+      <h3>Authorization Services는 보류</h3>
+      <p class="small">강력하지만 Keycloak에 정책이 쌓이면 디버깅이 어렵다. 역할·scope로 안 풀리는 요구가 실제로 나올 때 도입한다.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 25. 자주 하는 실수 -->
+<section class="slide">
+  <h2>자주 하는 실수</h2>
+  <div class="cols c-3">
+    <div class="card bad"><h3>❌ master realm에 앱 등록</h3><p class="small">master는 Keycloak 자체 관리용. 사고 나면 전체가 뚫린다. 업무 realm을 따로 만든다.</p></div>
+    <div class="card bad"><h3>❌ 운영에서 <code>start-dev</code></h3><p class="small">HTTP 허용, 내장 DB, 캐시 비활성. 운영은 <code>start</code> + PostgreSQL + TLS + <code>--hostname</code>.</p></div>
+    <div class="card bad"><h3>❌ client secret을 git에</h3><p class="small">yml에 직접 쓰지 않는다. 환경 변수나 Vault. 유출 시 Credentials 탭에서 Regenerate.</p></div>
+    <div class="card bad"><h3>❌ <code>aud</code> 미검증</h3><p class="small">같은 realm의 모든 토큰이 통과한다. 검증기(20장) + Audience 매퍼(12장)는 한 쌍.</p></div>
+    <div class="card bad"><h3>❌ access token 수명을 길게</h3><p class="small">"자꾸 만료돼요"에 1시간으로 늘리지 말 것. 기본 5~15분 유지, 갱신은 refresh/client 라이브러리에.</p></div>
+    <div class="card bad"><h3>❌ <code>"admin"</code> 문자열 하드코딩</h3><p class="small">사람 등급이 아니라 <code>agent:audit</code> 같은 기능 단위 역할을 검사한다. 정책 변경 = 설정 변경.</p></div>
+  </div>
+  <p class="small muted mt">코드 쪽 함정(같은 클래스 내부 호출, <code>@EnableMethodSecurity</code> 누락)은 21장 참조.</p>
+</section>
+
+<!-- 26. 요약 / 실습 / 다음 회차 -->
+<section class="slide">
+  <h2>요약 · 실습 과제 · 다음 회차</h2>
+  <div class="cols">
+    <div>
+      <h3>체크리스트</h3>
+      <ul class="checklist">
+        <li>Realm은 격리 단위, master는 관리 전용</li>
+        <li>Client = 등록된 앱·에이전트·API. 에이전트는 Service account</li>
+        <li>Role은 Keycloak DB → 발급 시 JWT <code>realm_access</code> / <code>resource_access</code></li>
+        <li>Scope·Mapper가 "토큰에 무엇을 넣을지" 결정. <code>aud</code>는 Audience 매퍼</li>
+        <li>API는 공개키로 로컬 검증. Keycloak에 요청당 호출 없음</li>
+        <li>Spring: issuer-uri + roles 변환기 + aud 검증기 + <code>@PreAuthorize</code></li>
+      </ul>
+    </div>
+    <div class="stack">
+      <div class="card">
+        <h3>실습 과제</h3>
+        <ol class="small" style="padding-left:22px;margin:0">
+          <li>Docker로 Keycloak 실행, realm <code>company</code> 생성</li>
+          <li>client <code>report-api</code>(검증용), <code>report-agent</code>(Service account) 생성, 역할·Audience 매퍼 설정</li>
+          <li>curl로 토큰 받아 <code>realm_access.roles</code>, <code>aud</code> 확인</li>
+          <li>Spring Resource Server에 붙여 200 / 403 / 401 재현</li>
+        </ol>
+      </div>
+      <div class="card note big">
+        <h3>다음 회차 — BFF</h3>
+        <p>FE(브라우저)가 생기면 토큰을 누가 들고 있어야 할까? 브라우저에 두지 않고 서버가 대신 드는 방법.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+<script src="assets/slides.js"></script>
+</body>
+</html>

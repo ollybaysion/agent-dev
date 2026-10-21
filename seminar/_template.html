@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N회차 · 제목 (템플릿)</title>
+<link rel="stylesheet" href="assets/slides.css">
+</head>
+<body>
+<!--
+  작성 규칙 (모든 회차 공통)
+  - 슬라이드 = <section class="slide"> 하나. 설계 크기 1280×720, 패딩 48/72/64. 넘치면 잘린다 → 분할.
+  - 제목 슬라이드: class="slide title", 섹션 구분: class="slide section".
+  - 한 장에 글머리 ≤ 7개, 코드 ≤ 18줄(pre.small 이면 ≤ 22줄), 표 ≤ 7행.
+  - 그림: <figure class="diagram"><svg viewBox="0 0 W H" role="img" aria-label="…">…</svg><figcaption>…</figcaption></figure>
+    · 전체 폭 그림은 viewBox 폭 1136, 2단 그림은 540~560 → 화면 픽셀과 거의 1:1. 글자 13~16px.
+    · 색은 클래스로만: svg-idp(Keycloak/IdP) svg-token(토큰) svg-app(앱/API) svg-agent(에이전트) svg-user(사람)
+      svg-line(.dashed .bad .ok .idp .token .agent) svg-text(.b .small .muted .mono .bad .ok) svg-lifeline svg-group
+    · 화살촉은 공유 마커: marker-end="url(#arrow)" / #arrow-bad / #arrow-ok / #arrow-muted / #arrow-idp / #arrow-token / #arrow-agent
+      (slides.js 가 삽입하므로 SVG 안에 <defs> 를 두지 않는다. id 충돌 걱정 없음.)
+    · 한글 폭: 15px 글자 ≈ 15px/자. 상자 폭 ≥ 글자수×16 + 24.
+  - 코드: <pre><code class="lang-java">…</code></pre> (lang-yaml, lang-json, lang-js, lang-http, lang-bash). < > & 는 HTML 이스케이프.
+    강조는 코드 안 주석(// ← 여기)으로.
+  - 발표자 노트: <aside class="notes">…</aside> (N 키로 표시)
+  - 외부 리소스 금지(CDN, 웹폰트, 이미지). 전부 인라인.
+-->
+<main class="deck" data-deck="N회차 · 제목" data-index="index.html">
+
+<!-- 1. 제목 -->
+<section class="slide title">
+  <div class="kicker">에이전트 개발자를 위한 인증·인가 세미나 · N회차</div>
+  <h1>제목</h1>
+  <p class="sub">부제 한 줄</p>
+  <p class="meta">대상: Java/Spring 경험이 있는 에이전트 개발자 · 사전 지식: SSO 없음 · 50분</p>
+</section>
+
+<!-- 2. 글 + 그림 2단 -->
+<section class="slide">
+  <h2>글과 그림을 나란히</h2>
+  <div class="cols w-2-3 middle">
+    <div>
+      <ul>
+        <li>왼쪽은 글머리, 오른쪽은 그림</li>
+        <li>글머리는 7개 이하</li>
+        <li class="muted small">보조 설명은 작게</li>
+      </ul>
+      <div class="card note">
+        <h3>핵심</h3>
+        <p>한 슬라이드는 한 주장만.</p>
+      </div>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 640 260" role="img" aria-label="앱이 IdP에서 토큰을 받아 API를 부르는 세 상자 그림">
+        <rect x="20" y="100" width="150" height="60" rx="10" class="svg-app"/>
+        <text x="95" y="135" text-anchor="middle" class="svg-text b">앱</text>
+        <rect x="245" y="20" width="150" height="60" rx="10" class="svg-idp"/>
+        <text x="320" y="55" text-anchor="middle" class="svg-text b">Keycloak</text>
+        <rect x="470" y="100" width="150" height="60" rx="10" class="svg-app"/>
+        <text x="545" y="135" text-anchor="middle" class="svg-text b">업무 API</text>
+        <!-- 앱 → Keycloak -->
+        <path d="M170,118 L245,60" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="190" y="78" class="svg-text small">① 토큰 요청</text>
+        <!-- Keycloak → 앱 (토큰) -->
+        <path d="M250,80 L175,138" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="150" y="185" class="svg-text small token">② JWT</text>
+        <!-- 앱 → API -->
+        <path d="M170,140 L470,140" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="320" y="130" text-anchor="middle" class="svg-text small mono">Authorization: Bearer …</text>
+        <!-- 거절 예시 -->
+        <path d="M545,160 L545,220 L95,220 L95,165" class="svg-line bad dashed" marker-end="url(#arrow-bad)"/>
+        <text x="320" y="240" text-anchor="middle" class="svg-text small bad">aud 불일치 → 403</text>
+        <!-- 토큰 내용 상자 -->
+        <rect x="430" y="20" width="190" height="62" rx="8" class="svg-token"/>
+        <text x="440" y="40" class="svg-text mono xs">"aud": "report-api"</text>
+        <text x="440" y="56" class="svg-text mono xs">"roles": ["report-writer"]</text>
+        <text x="440" y="72" class="svg-text mono xs">"exp": 1760000000</text>
+      </svg>
+      <figcaption>그림 설명은 캡션에. 그림 안 문장은 짧게.</figcaption>
+    </figure>
+  </div>
+  <aside class="notes">발표자 노트 예시. N 키로 표시된다.</aside>
+</section>
+
+<!-- 3. 순서도(시퀀스) 관례 -->
+<section class="slide">
+  <h2>순서도 관례</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 400" role="img" aria-label="브라우저, 앱 서버, Keycloak 세 참여자 사이의 로그인 순서">
+      <!-- 참여자 머리 -->
+      <rect x="40" y="10" width="200" height="44" rx="8" class="svg-user"/>
+      <text x="140" y="38" text-anchor="middle" class="svg-text b">브라우저</text>
+      <rect x="468" y="10" width="200" height="44" rx="8" class="svg-app"/>
+      <text x="568" y="38" text-anchor="middle" class="svg-text b">앱 서버 (Spring)</text>
+      <rect x="896" y="10" width="200" height="44" rx="8" class="svg-idp"/>
+      <text x="996" y="38" text-anchor="middle" class="svg-text b">Keycloak</text>
+      <!-- 생명선 -->
+      <line x1="140" y1="54" x2="140" y2="390" class="svg-lifeline"/>
+      <line x1="568" y1="54" x2="568" y2="390" class="svg-lifeline"/>
+      <line x1="996" y1="54" x2="996" y2="390" class="svg-lifeline"/>
+      <!-- 메시지 -->
+      <path d="M140,100 L560,100" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="350" y="92" text-anchor="middle" class="svg-text small">① GET /reports (세션 없음)</text>
+      <path d="M568,150 L148,150" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="358" y="142" text-anchor="middle" class="svg-text small">② 302 → Keycloak 로그인 주소</text>
+      <path d="M140,200 L988,200" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="564" y="192" text-anchor="middle" class="svg-text small">③ 로그인 화면 → 아이디/비밀번호</text>
+      <path d="M996,250 L148,250" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="572" y="242" text-anchor="middle" class="svg-text small">④ 302 → 앱의 callback?code=…</text>
+      <path d="M568,300 L988,300" class="svg-line idp" marker-end="url(#arrow-idp)"/>
+      <text x="778" y="292" text-anchor="middle" class="svg-text small idp">⑤ code + client secret (서버 간)</text>
+      <path d="M996,345 L576,345" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="786" y="337" text-anchor="middle" class="svg-text small token">⑥ access / ID / refresh 토큰</text>
+      <!-- 노트 -->
+      <rect x="40" y="300" width="300" height="60" rx="8" class="svg-token"/>
+      <text x="52" y="322" class="svg-text small b token">⑤⑥은 브라우저를 거치지 않는다</text>
+      <text x="52" y="344" class="svg-text small">= 백 채널. 토큰이 URL에 안 남는다.</text>
+    </svg>
+    <figcaption>참여자 머리 → 점선 생명선 → 번호 붙은 가로 화살표. 토큰이 움직이는 화살표는 노란색.</figcaption>
+  </figure>
+</section>
+
+<!-- 4. 코드 + 설명 -->
+<section class="slide">
+  <h2>코드와 설명</h2>
+  <div class="cols w-3-2">
+    <div>
+      <p class="code-title">SecurityConfig.java</p>
+<pre><code class="lang-java">@Configuration
+@EnableMethodSecurity
+public class SecurityConfig {
+
+    @Bean
+    SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .authorizeHttpRequests(auth -&gt; auth
+                .requestMatchers("/actuator/health").permitAll()
+                .anyRequest().authenticated())
+            .oauth2Login(Customizer.withDefaults());   // ← 로그인 흐름 전부
+        return http.build();
+    }
+}</code></pre>
+    </div>
+    <div class="stack">
+      <div class="card note"><h3>무엇을 하나</h3><p><code>oauth2Login()</code> 한 줄이 리다이렉트, code 교환, 세션 생성을 맡는다.</p></div>
+      <div class="card warn"><h3>주의</h3><p>로그인 화면 코드는 0줄. Keycloak이 제공한다.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 5. 표 -->
+<section class="slide">
+  <h2>비교 표</h2>
+  <table>
+    <thead><tr><th style="width:22%">구분</th><th>세션 쿠키</th><th>토큰(JWT)</th></tr></thead>
+    <tbody>
+      <tr><td>상태</td><td>서버가 보관</td><td>토큰 자체에 포함</td></tr>
+      <tr><td>검증</td><td>세션 저장소 조회</td><td>서명 검증(공개키)</td></tr>
+      <tr><td>적합</td><td>브라우저 ↔ 서버</td><td>서버 ↔ 서버, API</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 6. 실수 카드 -->
+<section class="slide">
+  <h2>자주 하는 실수</h2>
+  <div class="cols c-3">
+    <div class="card bad"><h3>❌ 서명 검증 생략</h3><p>payload만 디코딩해서 믿으면 누구나 토큰을 위조할 수 있다.</p></div>
+    <div class="card bad"><h3>❌ aud 미검증</h3><p>같은 realm의 다른 서비스용 토큰이 통과한다.</p></div>
+    <div class="card bad"><h3>❌ 토큰을 URL에</h3><p>로그, 히스토리, Referer에 남는다.</p></div>
+  </div>
+</section>
+
+<!-- 7. 섹션 구분 -->
+<section class="slide section">
+  <div class="num">02</div>
+  <h2>섹션 제목</h2>
+  <p>섹션 한 줄 설명</p>
+</section>
+
+<!-- 8. 체크리스트 / 다음 회차 -->
+<section class="slide">
+  <h2>요약</h2>
+  <div class="cols">
+    <ul class="checklist">
+      <li>항목 1</li>
+      <li>항목 2</li>
+    </ul>
+    <div class="card note big">
+      <h3>다음 회차</h3>
+      <p>예고 문장.</p>
+    </div>
+  </div>
+</section>
+
+</main>
+<script src="assets/slides.js"></script>
+</body>
+</html>
