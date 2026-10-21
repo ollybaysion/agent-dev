@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>들어가며 · 놀이공원으로 이해하는 인증·인가</title>
+<link rel="stylesheet" href="assets/slides.css">
+<style>
+  .deck .where { text-align: right; font-size: 15px; color: var(--muted); margin: 6px 0 0; }
+  .deck .big-table td, .deck .big-table th { font-size: 21px; padding: 10px 16px; }
+  .deck .three li { font-size: 34px; margin: 30px 0; padding-left: 64px; }
+  .deck .three li::before { width: 46px; height: 46px; font-size: 22px; }
+</style>
+</head>
+<body>
+<main class="deck" data-deck="들어가며 · 놀이공원으로 이해하는 인증·인가" data-index="index.html">
+
+<!-- 1. 제목 -->
+<section class="slide title">
+  <div class="kicker">에이전트 개발자를 위한 인증·인가 세미나 · 들어가며</div>
+  <h1>놀이공원으로 이해하는 인증·인가</h1>
+  <p class="sub">용어 없이, 그림으로. 이름표는 마지막에 붙인다.</p>
+  <p class="meta">사전 지식: 없음 · 약 15분</p>
+  <aside class="notes">1회차보다 앞에 두는 자료. 장마다 문장 하나와 그림 하나뿐이다. 설명은 전부 이 노트에 있다. SSO, Keycloak, OAuth 2.0, OIDC, BFF, A2A를 놀이공원 하나로 지나간 뒤 마지막 두 장에서 이름표를 붙인다. 목표는 정의가 아니라 그림 하나를 머리에 넣는 것.</aside>
+</section>
+
+<!-- 2. 등장인물 -->
+<section class="slide">
+  <h2>등장인물은 다섯</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 250" role="img" aria-label="다섯 등장인물: 손님, 매표소, 놀이기구, 심부름 로봇, 안내 데스크">
+      <rect x="0" y="20" width="200" height="210" rx="14" class="svg-user"/>
+      <circle cx="100" cy="88" r="20" class="svg-user"/>
+      <rect x="70" y="114" width="60" height="48" rx="16" class="svg-user"/>
+      <text x="100" y="205" text-anchor="middle" class="svg-text b lg">손님</text>
+
+      <rect x="234" y="20" width="200" height="210" rx="14" class="svg-idp"/>
+      <path d="M274,104 L334,60 L394,104 Z" class="svg-idp"/>
+      <rect x="288" y="104" width="92" height="56" rx="4" class="svg-idp"/>
+      <rect x="318" y="118" width="32" height="26" rx="3" class="svg-user"/>
+      <text x="334" y="205" text-anchor="middle" class="svg-text b lg">매표소</text>
+
+      <rect x="468" y="20" width="200" height="210" rx="14" class="svg-app"/>
+      <circle cx="568" cy="110" r="40" class="svg-app"/>
+      <line x1="568" y1="70" x2="568" y2="150" class="svg-line"/>
+      <line x1="528" y1="110" x2="608" y2="110" class="svg-line"/>
+      <line x1="540" y1="82" x2="596" y2="138" class="svg-line"/>
+      <line x1="596" y1="82" x2="540" y2="138" class="svg-line"/>
+      <text x="568" y="205" text-anchor="middle" class="svg-text b lg">놀이기구</text>
+
+      <rect x="702" y="20" width="200" height="210" rx="14" class="svg-agent"/>
+      <line x1="802" y1="62" x2="802" y2="78" class="svg-line agent"/>
+      <circle cx="802" cy="60" r="5" class="svg-agent"/>
+      <rect x="770" y="78" width="64" height="50" rx="8" class="svg-agent"/>
+      <circle cx="789" cy="100" r="5" class="svg-user"/>
+      <circle cx="815" cy="100" r="5" class="svg-user"/>
+      <rect x="781" y="132" width="42" height="26" rx="6" class="svg-agent"/>
+      <text x="802" y="205" text-anchor="middle" class="svg-text b lg">심부름 로봇</text>
+
+      <rect x="936" y="20" width="200" height="210" rx="14" class="svg-app"/>
+      <rect x="986" y="86" width="100" height="24" rx="4" class="svg-token"/>
+      <text x="1036" y="103" text-anchor="middle" class="svg-text xs">쿠폰 보관함</text>
+      <rect x="966" y="112" width="140" height="52" rx="6" class="svg-app"/>
+      <text x="1036" y="144" text-anchor="middle" class="svg-text small">번호표 17</text>
+      <text x="1036" y="205" text-anchor="middle" class="svg-text b lg">안내 데스크</text>
+    </svg>
+    <figcaption>이 다섯이 전부다.</figcaption>
+  </figure>
+  <aside class="notes">소개만 하고 아직 아무 일도 일어나지 않는다. 색의 약속: 매표소는 보라, 놀이기구와 데스크는 파랑, 로봇은 초록, 쿠폰과 밴드는 노랑. 1~3회차 그림도 같은 색을 쓴다. 심부름 친구가 로봇인 이유: 사람이 아닌 프로그램(에이전트)도 손님처럼 등록된다는 것을 미리 심어 두기 위함.</aside>
+</section>
+
+<!-- 3. 옛날 -->
+<section class="slide">
+  <h2>옛날엔 놀이기구마다 매표소가 있었다</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 360" role="img" aria-label="손님 한 명이 매표소 세 곳에 각각 신분증을 내고, 매표소마다 장부가 따로 있다">
+      <rect x="40" y="140" width="200" height="80" rx="12" class="svg-user"/>
+      <text x="140" y="187" text-anchor="middle" class="svg-text b lg">손님</text>
+
+      <rect x="440" y="20" width="220" height="80" rx="10" class="svg-idp"/>
+      <text x="550" y="54" text-anchor="middle" class="svg-text b lg">매표소 ①</text>
+      <text x="550" y="80" text-anchor="middle" class="svg-text small muted">장부 ①</text>
+      <rect x="440" y="140" width="220" height="80" rx="10" class="svg-idp"/>
+      <text x="550" y="174" text-anchor="middle" class="svg-text b lg">매표소 ②</text>
+      <text x="550" y="200" text-anchor="middle" class="svg-text small muted">장부 ②</text>
+      <rect x="440" y="260" width="220" height="80" rx="10" class="svg-idp"/>
+      <text x="550" y="294" text-anchor="middle" class="svg-text b lg">매표소 ③</text>
+      <text x="550" y="320" text-anchor="middle" class="svg-text small muted">장부 ③ · 대충 봄</text>
+
+      <rect x="840" y="20" width="256" height="80" rx="10" class="svg-app"/>
+      <text x="968" y="68" text-anchor="middle" class="svg-text b lg">롤러코스터</text>
+      <rect x="840" y="140" width="256" height="80" rx="10" class="svg-app"/>
+      <text x="968" y="188" text-anchor="middle" class="svg-text b lg">관람차</text>
+      <rect x="840" y="260" width="256" height="80" rx="10" class="svg-app"/>
+      <text x="968" y="308" text-anchor="middle" class="svg-text b lg">범퍼카</text>
+
+      <path d="M240,165 L437,60" class="svg-line" marker-end="url(#arrow)"/>
+      <path d="M240,180 L437,180" class="svg-line" marker-end="url(#arrow)"/>
+      <path d="M240,195 L437,300" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="284" y="100" class="svg-text">신분증</text>
+      <text x="300" y="170" class="svg-text">신분증</text>
+      <text x="290" y="275" class="svg-text">신분증</text>
+      <path d="M660,60 L837,60" class="svg-line muted" marker-end="url(#arrow-muted)"/>
+      <path d="M660,180 L837,180" class="svg-line muted" marker-end="url(#arrow-muted)"/>
+      <path d="M660,300 L837,300" class="svg-line muted" marker-end="url(#arrow-muted)"/>
+    </svg>
+    <figcaption>신분증 세 번, 장부 세 권.</figcaption>
+  </figure>
+  <p class="where">1회차 SSO</p>
+  <aside class="notes">앱마다 로그인 화면이 있고, 비밀번호 장부가 앱마다 따로 있는 상태. 이름이 바뀌면 다섯 군데를 고치고, 퇴사자를 한 군데서만 빼먹으면 그 기구는 계속 탈 수 있다. 매표소마다 신분증 보는 솜씨도 다르다. 1회차 "왜 필요한가"의 비유판.</aside>
+</section>
+
+<!-- 4. 지금 -->
+<section class="slide">
+  <h2>이제 매표소는 하나, 손목밴드도 하나</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 360" role="img" aria-label="손님이 본부 매표소에서 신분증을 한 번 보여 주고 손목밴드를 받은 뒤, 놀이기구 세 곳에는 밴드만 보여 준다">
+      <rect x="40" y="30" width="200" height="80" rx="12" class="svg-user"/>
+      <text x="140" y="77" text-anchor="middle" class="svg-text b lg">손님</text>
+
+      <rect x="40" y="250" width="280" height="100" rx="12" class="svg-idp"/>
+      <text x="180" y="294" text-anchor="middle" class="svg-text b lg">본부 매표소</text>
+      <text x="180" y="322" text-anchor="middle" class="svg-text small muted">장부 한 권</text>
+
+      <path d="M100,110 L100,247" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="112" y="160" class="svg-text">① 신분증 한 번</text>
+      <path d="M200,250 L200,113" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="212" y="222" class="svg-text token">② 손목밴드</text>
+
+      <rect x="840" y="20" width="256" height="80" rx="10" class="svg-app"/>
+      <text x="968" y="68" text-anchor="middle" class="svg-text b lg">롤러코스터</text>
+      <rect x="840" y="140" width="256" height="80" rx="10" class="svg-app"/>
+      <text x="968" y="188" text-anchor="middle" class="svg-text b lg">관람차</text>
+      <rect x="840" y="260" width="256" height="80" rx="10" class="svg-app"/>
+      <text x="968" y="308" text-anchor="middle" class="svg-text b lg">범퍼카</text>
+
+      <path d="M240,55 L837,60" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <path d="M240,70 L837,180" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <path d="M240,85 L837,300" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="540" y="46" text-anchor="middle" class="svg-text token">③ 밴드만 보여 준다</text>
+    </svg>
+    <figcaption>신분증은 한 번. 그다음은 밴드만.</figcaption>
+  </figure>
+  <p class="where">1회차 SSO</p>
+  <aside class="notes">신분증 확인은 본부 매표소 한 곳에서 한 번만. 밴드를 차면 모든 놀이기구가 "본부가 확인한 손님"으로 믿는다. 장부가 한 권이라 이름 바꾸기·퇴사 처리가 한 번에 끝나고, 밴드를 끊으면 모든 기구에서 동시에 못 탄다. 놀이기구는 신분증 보는 법을 몰라도 된다. 이것이 1회차 "로그인을 한 곳에 맡기기". 앱은 로그인 화면을 만들지 않는다.</aside>
+</section>
+
+<!-- 5. 부스 -->
+<section class="slide">
+  <h2>매표소는 사서 설치한다</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 360" role="img" aria-label="본부 매표소 부스 안에 장부, 스티커 통, 규칙표가 있고, 스티커 통에서 손님의 손목밴드로 스티커가 붙는다">
+      <rect x="40" y="10" width="620" height="340" rx="14" class="svg-idp"/>
+      <text x="350" y="44" text-anchor="middle" class="svg-text b lg">본부 매표소 · 기성 부스</text>
+
+      <rect x="70" y="70" width="560" height="76" rx="8" class="svg-group"/>
+      <text x="90" y="100" class="svg-text b">장부</text>
+      <text x="90" y="130" class="svg-text muted">kim · lee · 로봇 A · 로봇 B</text>
+      <rect x="70" y="160" width="560" height="76" rx="8" class="svg-group"/>
+      <text x="90" y="190" class="svg-text b">스티커 통</text>
+      <text x="90" y="220" class="svg-text muted">직원 · 정비팀 · VIP · 보고서 심부름</text>
+      <rect x="70" y="250" width="560" height="76" rx="8" class="svg-group"/>
+      <text x="90" y="280" class="svg-text b">규칙표</text>
+      <text x="90" y="310" class="svg-text muted">정비실은 정비팀만 · 로봇 A는 보고서만</text>
+
+      <rect x="780" y="120" width="300" height="120" rx="12" class="svg-token"/>
+      <text x="930" y="156" text-anchor="middle" class="svg-text b lg">손목밴드 · kim</text>
+      <rect x="805" y="180" width="80" height="32" rx="16" class="svg-ok-box"/>
+      <text x="845" y="202" text-anchor="middle" class="svg-text small ok">직원</text>
+      <rect x="900" y="180" width="100" height="32" rx="16" class="svg-ok-box"/>
+      <text x="950" y="202" text-anchor="middle" class="svg-text small ok">정비팀</text>
+      <path d="M630,198 L777,186" class="svg-line idp" marker-end="url(#arrow-idp)"/>
+      <text x="930" y="275" text-anchor="middle" class="svg-text muted">매표소가 붙인다</text>
+    </svg>
+    <figcaption>스티커는 매표소가 붙인다. 놀이기구는 보기만 한다.</figcaption>
+  </figure>
+  <p class="where">2회차 Keycloak</p>
+  <aside class="notes">매표소를 처음부터 짓지 않고 기성 부스(Keycloak)를 사서 세운다. 부스 안에는 장부(사용자), 스티커 통(역할), 규칙표(어느 기구가 어떤 스티커를 요구하는지)가 있다. 스티커는 코드가 아니라 부스 설정이다. 로봇도 장부에 올린다. 공원이 둘이면 부스도 둘이고 장부·스티커·도장이 공원마다 따로다 — 이것이 realm. 2회차가 이 이야기.</aside>
+</section>
+
+<!-- 6. 쿠폰 -->
+<section class="slide">
+  <h2>비밀번호 대신 쿠폰을 준다</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 360" role="img" aria-label="손님이 매표소에 쿠폰을 요청하고, 받은 쿠폰을 심부름 로봇에게 주면, 로봇이 그 쿠폰으로 롤러코스터 입구를 통과한다. 비밀번호를 통째로 주는 길은 빨간 점선으로 금지">
+      <rect x="40" y="140" width="180" height="80" rx="12" class="svg-user"/>
+      <text x="130" y="187" text-anchor="middle" class="svg-text b lg">손님</text>
+
+      <rect x="300" y="20" width="240" height="80" rx="12" class="svg-idp"/>
+      <text x="420" y="67" text-anchor="middle" class="svg-text b lg">본부 매표소</text>
+
+      <rect x="300" y="160" width="280" height="150" rx="12" class="svg-token"/>
+      <text x="440" y="192" text-anchor="middle" class="svg-text b lg">쿠폰</text>
+      <text x="440" y="224" text-anchor="middle" class="svg-text">kim 대신 · 친구 A</text>
+      <text x="440" y="252" text-anchor="middle" class="svg-text">롤러코스터만</text>
+      <text x="440" y="280" text-anchor="middle" class="svg-text">오늘까지</text>
+
+      <rect x="680" y="140" width="200" height="80" rx="12" class="svg-agent"/>
+      <text x="780" y="187" text-anchor="middle" class="svg-text b lg">친구 A</text>
+      <rect x="940" y="140" width="180" height="80" rx="12" class="svg-app"/>
+      <text x="1030" y="187" text-anchor="middle" class="svg-text b lg">롤러코스터</text>
+
+      <path d="M220,160 L297,70" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="60" y="112" class="svg-text">① 쿠폰 주세요</text>
+      <path d="M420,100 L420,157" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="432" y="135" class="svg-text token">②</text>
+      <path d="M580,235 L677,195" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="612" y="208" class="svg-text token">③</text>
+      <path d="M880,180 L937,180" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="908" y="170" text-anchor="middle" class="svg-text token">④</text>
+
+      <path d="M130,220 L130,345 L780,345 L780,223" class="svg-line bad dashed" marker-end="url(#arrow-bad)"/>
+      <text x="455" y="338" text-anchor="middle" class="svg-text bad">✕ 비밀번호를 통째로 주면</text>
+    </svg>
+    <figcaption>쿠폰에는 세 칸. 누구 대신 · 무엇만 · 언제까지.</figcaption>
+  </figure>
+  <p class="where">보충 A OAuth 2.0</p>
+  <aside class="notes">비밀번호를 친구에게 주면 친구는 뭐든 할 수 있고, 돌려받아도 비밀번호는 이미 알고 있다. 대신 매표소에서 "친구가 내 대신, 롤러코스터만, 오늘까지"라고 적힌 쿠폰을 받아 준다. 비밀번호는 매표소와 손님 사이에만 오간다. 쿠폰이 만료되면 새로 받는데 그때 쓰는 재발급권은 따로 있다. 세 칸이 뒤에서 sub·scope·exp가 된다. 보충 A가 이 이야기.</aside>
+</section>
+
+<!-- 7. 쿠폰 vs 명찰 -->
+<section class="slide">
+  <h2>쿠폰은 "뭘 할 수 있나", 명찰은 "누구인가"</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 330" role="img" aria-label="왼쪽은 쿠폰: 롤러코스터 1회, 오늘까지, 누가 들고 있든 상관없음. 오른쪽은 명찰: kim, 사진, 본부 도장">
+      <rect x="60" y="20" width="460" height="240" rx="12" class="svg-token"/>
+      <circle cx="60" cy="140" r="18" class="svg-group"/>
+      <circle cx="520" cy="140" r="18" class="svg-group"/>
+      <text x="290" y="62" text-anchor="middle" class="svg-text b lg">쿠폰</text>
+      <text x="290" y="112" text-anchor="middle" class="svg-text lg">롤러코스터 1회</text>
+      <text x="290" y="146" text-anchor="middle" class="svg-text lg">오늘까지</text>
+      <text x="290" y="180" text-anchor="middle" class="svg-text lg">kim 대신 · 친구 A</text>
+      <text x="290" y="230" text-anchor="middle" class="svg-text small muted">누가 들고 있든 상관없음</text>
+      <text x="290" y="305" text-anchor="middle" class="svg-text b lg">"뭘 할 수 있나"</text>
+
+      <rect x="616" y="20" width="460" height="240" rx="12" class="svg-user"/>
+      <circle cx="700" cy="110" r="44" class="svg-group"/>
+      <text x="700" y="115" text-anchor="middle" class="svg-text small muted">사진</text>
+      <text x="770" y="90" class="svg-text b lg">kim</text>
+      <text x="770" y="120" class="svg-text">김보라 · 개발팀</text>
+      <text x="770" y="148" class="svg-text">오늘 09:00 발급</text>
+      <circle cx="1010" cy="210" r="34" class="svg-idp"/>
+      <text x="1010" y="206" text-anchor="middle" class="svg-text small idp">본부</text>
+      <text x="1010" y="224" text-anchor="middle" class="svg-text small idp">도장</text>
+      <text x="640" y="235" class="svg-text small muted">할 일은 안 적혀 있음</text>
+      <text x="846" y="305" text-anchor="middle" class="svg-text b lg">"누구인가"</text>
+    </svg>
+    <figcaption>입구 직원은 쿠폰을 본다. "어서 오세요 kim 님"은 명찰을 본다.</figcaption>
+  </figure>
+  <p class="where">보충 B OIDC</p>
+  <aside class="notes">쿠폰만 있으면 놀이기구는 태워 주지만 앱은 환영 인사도 내 기록 보여 주기도 못 한다. 명찰만 있으면 누구인지는 알지만 무엇을 허락받았는지 모른다. 그래서 매표소는 로그인할 때 둘을 함께 준다. 명찰의 이름은 매표소가 붙인 번호로 구분해 동명이인이 안 섞인다. OAuth 2.0(쿠폰) 위에 OIDC(명찰) 한 장을 얹은 것. 보충 B가 이 이야기.</aside>
+</section>
+
+<!-- 8. 입구 검사 -->
+<section class="slide">
+  <h2>입구 직원은 세 가지만 본다</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 340" role="img" aria-label="쿠폰 위의 도장, 기구 이름, 스티커 세 칸을 입구 직원이 하나씩 확인한다. 직원 옆에는 도장 견본이 있다">
+      <rect x="60" y="20" width="600" height="300" rx="12" class="svg-token"/>
+      <text x="360" y="56" text-anchor="middle" class="svg-text b lg">쿠폰</text>
+      <circle cx="130" cy="130" r="34" class="svg-idp"/>
+      <text x="130" y="126" text-anchor="middle" class="svg-text small idp">본부</text>
+      <text x="130" y="144" text-anchor="middle" class="svg-text small idp">도장</text>
+      <text x="185" y="136" class="svg-text lg">① 도장</text>
+      <text x="100" y="215" class="svg-text lg">② 롤러코스터용</text>
+      <text x="100" y="285" class="svg-text lg">③ 스티커:</text>
+      <rect x="215" y="264" width="80" height="32" rx="16" class="svg-ok-box"/>
+      <text x="255" y="286" text-anchor="middle" class="svg-text small ok">직원</text>
+      <text x="630" y="300" text-anchor="end" class="svg-text small muted">오늘까지</text>
+
+      <rect x="780" y="30" width="300" height="90" rx="12" class="svg-app"/>
+      <text x="930" y="83" text-anchor="middle" class="svg-text b lg">입구 직원</text>
+      <rect x="780" y="170" width="300" height="90" rx="12" class="svg-group"/>
+      <text x="930" y="205" text-anchor="middle" class="svg-text b">도장 견본</text>
+      <text x="930" y="232" text-anchor="middle" class="svg-text small muted">매표소에서 미리 받아 둠</text>
+
+      <path d="M660,136 L777,70" class="svg-line ok" marker-end="url(#arrow-ok)"/>
+      <path d="M660,215 L777,85" class="svg-line ok" marker-end="url(#arrow-ok)"/>
+      <path d="M660,285 L777,100" class="svg-line ok" marker-end="url(#arrow-ok)"/>
+      <text x="930" y="300" text-anchor="middle" class="svg-text muted">전화하지 않는다. 견본과 대조만.</text>
+    </svg>
+    <figcaption>도장 · 기구 · 스티커. 매표소에 전화는 안 한다.</figcaption>
+  </figure>
+  <p class="where">2회차 Keycloak</p>
+  <aside class="notes">① 도장이 진짜인가 — 본부 도장은 흉내 낼 수 없고, 직원은 도장 견본(공개키)만 갖고 있으면 된다. ② 이 기구용 쿠폰인가 — 관람차 쿠폰으로 롤러코스터는 거절. ③ 스티커가 맞는가 — 정비팀 스티커가 있어야 들어가는 곳도 있다. 쿠폰이 없거나 가짜면 "매표소부터 다녀오세요"(401), 쿠폰은 진짜인데 스티커가 모자라면 "이 기구는 못 타요"(403). 검사는 입구에서 끝나고 기구 안에서는 "이미 검사된 손님"으로 대한다.</aside>
+</section>
+
+<!-- 9. 손목 vs 데스크 -->
+<section class="slide">
+  <h2>쿠폰은 손목이 아니라 데스크에</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 300" role="img" aria-label="왼쪽: 손목에 쿠폰을 찬 손님 옆에 소매치기가 있고, 쿠폰을 뺏으면 하루 종일 손님 이름으로 탄다. 오른쪽: 손님은 번호표만 들고 쿠폰은 안내 데스크가 보관한다. 번호표를 뺏겨도 손님이 나가면 종이쪽지가 된다">
+      <text x="270" y="24" text-anchor="middle" class="svg-text b lg bad">✕ 손목에 찬다</text>
+      <text x="866" y="24" text-anchor="middle" class="svg-text b lg ok">✓ 데스크에 맡긴다</text>
+      <line x1="568" y1="10" x2="568" y2="290" class="svg-line muted dashed"/>
+
+      <g transform="translate(0,50)">
+        <rect x="10" y="40" width="150" height="70" rx="10" class="svg-user"/>
+        <text x="85" y="70" text-anchor="middle" class="svg-text b">손님</text>
+        <rect x="30" y="80" width="110" height="22" rx="6" class="svg-token"/>
+        <text x="85" y="96" text-anchor="middle" class="svg-text xs">쿠폰 (손목)</text>
+        <rect x="230" y="40" width="130" height="70" rx="10" class="svg-bad-box"/>
+        <text x="295" y="70" text-anchor="middle" class="svg-text b bad">소매치기</text>
+        <text x="295" y="94" text-anchor="middle" class="svg-text xs bad">남의 스크립트</text>
+        <path d="M230,91 L143,91" class="svg-line bad" marker-end="url(#arrow-bad)"/>
+        <rect x="400" y="40" width="130" height="70" rx="10" class="svg-app"/>
+        <text x="465" y="80" text-anchor="middle" class="svg-text b">놀이기구</text>
+        <path d="M360,75 L397,75" class="svg-line bad dashed" marker-end="url(#arrow-bad)"/>
+        <text x="270" y="160" text-anchor="middle" class="svg-text bad">뺏기면 하루 종일 내 이름으로 탄다</text>
+        <text x="270" y="186" text-anchor="middle" class="svg-text bad">뺏긴 줄도 모른다</text>
+      </g>
+
+      <g transform="translate(596,50)">
+        <rect x="10" y="40" width="150" height="70" rx="10" class="svg-user"/>
+        <text x="85" y="70" text-anchor="middle" class="svg-text b">손님</text>
+        <rect x="40" y="80" width="90" height="22" rx="6" class="svg-group"/>
+        <text x="85" y="96" text-anchor="middle" class="svg-text xs">번호표 17</text>
+        <rect x="215" y="20" width="150" height="110" rx="10" class="svg-app"/>
+        <text x="290" y="48" text-anchor="middle" class="svg-text b">안내 데스크</text>
+        <rect x="235" y="62" width="110" height="22" rx="6" class="svg-token"/>
+        <text x="290" y="78" text-anchor="middle" class="svg-text xs">쿠폰 (보관함)</text>
+        <text x="290" y="112" text-anchor="middle" class="svg-text xs muted">번호표 ↔ 쿠폰</text>
+        <path d="M160,75 L212,75" class="svg-line" marker-end="url(#arrow)"/>
+        <rect x="400" y="40" width="130" height="70" rx="10" class="svg-app"/>
+        <text x="465" y="80" text-anchor="middle" class="svg-text b">놀이기구</text>
+        <path d="M365,75 L397,75" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="270" y="160" text-anchor="middle" class="svg-text ok">번호표를 뺏겨도 종이쪽지</text>
+        <text x="270" y="186" text-anchor="middle" class="svg-text ok">쿠폰은 한 번도 내 손목에 없었다</text>
+      </g>
+    </svg>
+    <figcaption>소매치기는 똑같이 있다. 뺏겼을 때 잃는 것이 다르다.</figcaption>
+  </figure>
+  <p class="where">3회차 BFF</p>
+  <aside class="notes">공원은 사람이 많고 내 주머니에는 남이 넣어 둔 물건(남의 스크립트)도 있다. 쿠폰이 손목에 있으면 그중 하나가 가져가고, 뺏기면 공원 문 닫을 때까지 내 이름으로 탄다. 데스크에 맡기고 번호표만 받으면, 기구를 탈 때 데스크가 쿠폰을 대신 보여 준다. 번호표를 뺏겨도 내가 나가면 종이쪽지. BFF는 소매치기(XSS)를 없애는 게 아니라 뺏겼을 때 잃는 것을 줄인다. 3회차가 이 이야기.</aside>
+</section>
+
+<!-- 10. 친구의 친구 -->
+<section class="slide">
+  <h2>친구에게 넘길 땐 더 좁은 쿠폰으로</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 250" role="img" aria-label="손님이 친구 A에게 쿠폰을 주고, A는 매표소에서 더 좁은 쿠폰으로 바꿔 친구 B에게 준다. B는 그 쿠폰으로 솜사탕 가게에 간다. A의 쿠폰을 B에게 그대로 넘기는 길은 빨간 점선으로 금지">
+      <rect x="0" y="110" width="150" height="60" rx="10" class="svg-user"/>
+      <text x="75" y="146" text-anchor="middle" class="svg-text b">손님 kim</text>
+
+      <rect x="270" y="110" width="180" height="60" rx="10" class="svg-agent"/>
+      <text x="360" y="146" text-anchor="middle" class="svg-text b">친구 A</text>
+      <path d="M150,140 L267,140" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="208" y="130" text-anchor="middle" class="svg-text small token">① 쿠폰</text>
+      <text x="360" y="200" text-anchor="middle" class="svg-text small muted">kim 대신 · 롤러코스터 · 솜사탕</text>
+
+      <rect x="270" y="10" width="180" height="56" rx="10" class="svg-idp"/>
+      <text x="360" y="44" text-anchor="middle" class="svg-text b">본부 매표소</text>
+      <path d="M330,110 L330,69" class="svg-line idp" marker-end="url(#arrow-idp)"/>
+      <path d="M390,66 L390,107" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="322" y="92" text-anchor="end" class="svg-text small idp">② 바꿔 주세요</text>
+      <text x="398" y="92" class="svg-text small token">③ 좁은 쿠폰</text>
+
+      <rect x="610" y="110" width="180" height="60" rx="10" class="svg-agent"/>
+      <text x="700" y="146" text-anchor="middle" class="svg-text b">친구 B</text>
+      <path d="M450,140 L607,140" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="528" y="130" text-anchor="middle" class="svg-text small token">④ 좁은 쿠폰</text>
+      <text x="700" y="200" text-anchor="middle" class="svg-text small muted">kim 대신 · A가 시킴 · 솜사탕만</text>
+
+      <rect x="950" y="110" width="186" height="60" rx="10" class="svg-app"/>
+      <text x="1043" y="146" text-anchor="middle" class="svg-text b">솜사탕 가게</text>
+      <path d="M790,140 L947,140" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="868" y="130" text-anchor="middle" class="svg-text small token">⑤ 제시</text>
+
+      <path d="M450,166 L466,220 L592,220 L607,168" class="svg-line bad dashed" marker-end="url(#arrow-bad)"/>
+      <text x="530" y="246" text-anchor="middle" class="svg-text small bad">✕ 그대로 넘기면 B도 롤러코스터를 탄다</text>
+    </svg>
+    <figcaption>그대로 넘기지 말고, 더 좁은 쿠폰으로 바꿔서.</figcaption>
+  </figure>
+  <p class="where">별도 자료 A2A</p>
+  <aside class="notes">친구 A가 B에게 솜사탕 심부름을 시킨다. A의 쿠폰을 그대로 주면 B도 롤러코스터를 탈 수 있고, 가게는 kim이 직접 온 줄 안다. 대신 A는 매표소에서 "kim 대신, A가 시켜서, 솜사탕만"이라고 적힌 더 좁은 쿠폰으로 바꿔 받는다. 쿠폰에 "누구 대신·누가 시켜서"가 쌓여 적혀서 나중에 "솜사탕 누가 샀지?"에 답할 수 있다. Token Exchange와 act 클레임의 비유판. 1~3회차를 다 본 뒤 별도 자료 A2A에서.</aside>
+</section>
+
+<!-- 11. 전체 그림 -->
+<section class="slide">
+  <h2>하루의 흐름</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 420" role="img" aria-label="손님이 본부 매표소에서 신분증을 한 번 보여 주고 손목밴드·명찰·쿠폰을 받는다. 쿠폰은 안내 데스크에 맡기고 번호표를 받으며, 데스크가 놀이기구 입구에 쿠폰을 대신 제시한다. 손님은 친구 A에게 쿠폰을 건네고, A는 매표소에서 좁은 쿠폰으로 바꿔 친구 B에게 주며, B는 솜사탕 가게에 간다">
+      <rect x="440" y="10" width="256" height="64" rx="10" class="svg-idp"/>
+      <text x="568" y="48" text-anchor="middle" class="svg-text b lg">본부 매표소</text>
+
+      <rect x="20" y="170" width="170" height="64" rx="10" class="svg-user"/>
+      <text x="105" y="208" text-anchor="middle" class="svg-text b lg">손님 kim</text>
+
+      <rect x="440" y="170" width="256" height="64" rx="10" class="svg-app"/>
+      <text x="568" y="208" text-anchor="middle" class="svg-text b lg">안내 데스크</text>
+
+      <rect x="900" y="120" width="216" height="50" rx="8" class="svg-app"/>
+      <text x="1008" y="151" text-anchor="middle" class="svg-text b">롤러코스터</text>
+      <rect x="900" y="185" width="216" height="50" rx="8" class="svg-app"/>
+      <text x="1008" y="216" text-anchor="middle" class="svg-text b">관람차</text>
+      <rect x="900" y="250" width="216" height="50" rx="8" class="svg-app"/>
+      <text x="1008" y="274" text-anchor="middle" class="svg-text b">정비실</text>
+      <text x="1008" y="291" text-anchor="middle" class="svg-text xs muted">"정비팀" 스티커 필요</text>
+      <text x="1008" y="104" text-anchor="middle" class="svg-text small muted">도장 · 기구 · 스티커 검사</text>
+
+      <rect x="240" y="330" width="200" height="56" rx="10" class="svg-agent"/>
+      <text x="340" y="364" text-anchor="middle" class="svg-text b">친구 A</text>
+      <rect x="640" y="330" width="200" height="56" rx="10" class="svg-agent"/>
+      <text x="740" y="364" text-anchor="middle" class="svg-text b">친구 B</text>
+      <rect x="900" y="330" width="216" height="56" rx="10" class="svg-app"/>
+      <text x="1008" y="364" text-anchor="middle" class="svg-text b">솜사탕 가게</text>
+
+      <path d="M105,170 L105,30 L437,30" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="270" y="22" text-anchor="middle" class="svg-text small">① 신분증 한 번</text>
+      <path d="M440,58 L150,58 L150,167" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="300" y="78" text-anchor="middle" class="svg-text small token">② 손목밴드 · 명찰 · 쿠폰</text>
+      <path d="M190,202 L437,202" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="313" y="193" text-anchor="middle" class="svg-text small token">③ 쿠폰 맡김 → 번호표</text>
+      <path d="M696,202 L897,210" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="796" y="192" text-anchor="middle" class="svg-text small token">④ 데스크가 쿠폰 제시</text>
+      <path d="M105,234 L105,358 L237,358" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="170" y="350" text-anchor="middle" class="svg-text small token">⑤ 쿠폰 건넴</text>
+      <path d="M340,330 L470,76" class="svg-line idp dashed" marker-end="url(#arrow-idp)"/>
+      <text x="372" y="262" text-anchor="end" class="svg-text small idp">⑥ 좁은 쿠폰으로 바꿈</text>
+      <path d="M440,358 L637,358" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="538" y="350" text-anchor="middle" class="svg-text small token">⑦ 좁은 쿠폰</text>
+      <path d="M840,358 L897,358" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="868" y="350" text-anchor="middle" class="svg-text small token">⑧</text>
+
+      <text x="340" y="408" text-anchor="middle" class="svg-text xs muted">kim 대신 · 롤러코스터 · 솜사탕</text>
+      <text x="740" y="408" text-anchor="middle" class="svg-text xs muted">kim 대신 · A가 시킴 · 솜사탕만</text>
+    </svg>
+    <figcaption>①② 1회차 · 부스 운영 2회차 · ③④ 3회차 · 쿠폰 보충 A · 명찰 보충 B · ⑤~⑧ A2A</figcaption>
+  </figure>
+  <aside class="notes">지금까지의 장면을 한 그림에 모은 것. 번호만 따라가면 시리즈 순서와 같다. 1회차 시작 때 이 그림을 다시 띄우면 좋다.</aside>
+</section>
+
+<!-- 12. 이름표 -->
+<section class="slide">
+  <h2>이름표 붙이기</h2>
+  <table class="big-table">
+    <thead><tr><th style="width:42%">비유</th><th>실제</th></tr></thead>
+    <tbody>
+      <tr><td>본부 매표소 하나</td><td><strong>SSO</strong> · 그 매표소 = <strong>Keycloak</strong> (IdP)</td></tr>
+      <tr><td>공원 하나</td><td><strong>Realm</strong> · 장부·스티커·도장이 따로인 독립된 세계</td></tr>
+      <tr><td>쿠폰</td><td><strong>Access Token</strong> · OAuth 2.0</td></tr>
+      <tr><td>명찰</td><td><strong>ID Token</strong> · OIDC</td></tr>
+      <tr><td>스티커</td><td><strong>Role</strong></td></tr>
+      <tr><td>도장 견본</td><td><strong>공개키</strong> · 서명만 보고, 매표소에 전화 안 함</td></tr>
+      <tr><td>안내 데스크 + 번호표</td><td><strong>BFF</strong> + 세션 쿠키</td></tr>
+      <tr><td>좁은 쿠폰으로 바꾸기</td><td><strong>Token Exchange</strong></td></tr>
+    </tbody>
+  </table>
+  <aside class="notes">표는 읽어 주지 않는다. "오늘 본 그림의 이름표"라고만 하고 넘어간다. 더 세밀한 대응(scope·aud·exp = 쿠폰의 세 칸, Refresh Token = 재발급권, 401/403 = 두 가지 거절 문구, Client Credentials = 로봇의 비밀번호, 소매치기 = XSS)은 질문이 나올 때 말한다.</aside>
+</section>
+
+<!-- 13. 지도 -->
+<section class="slide">
+  <h2>어디서 더 보나</h2>
+  <div class="cols c-3">
+    <div class="card"><h3>1회차 · SSO</h3><p>매표소 하나, 손목밴드</p></div>
+    <div class="card"><h3>2회차 · Keycloak</h3><p>부스 운영, 입구 검사</p></div>
+    <div class="card"><h3>3회차 · BFF</h3><p>손목이냐 데스크냐</p></div>
+  </div>
+  <div class="cols c-3 mt">
+    <div class="card flat"><h3>보충 A · OAuth 2.0</h3><p>쿠폰</p></div>
+    <div class="card flat"><h3>보충 B · OIDC</h3><p>명찰</p></div>
+    <div class="card flat"><h3>별도 · A2A</h3><p>친구의 친구</p></div>
+  </div>
+  <aside class="notes">어느 장면이 어느 자료인지만 기억하면 중간에 들어와도 길을 잃지 않는다. 순서는 1 → 2 → 3, 보충 A·B는 1회차 뒤에, A2A는 전부 본 뒤에.</aside>
+</section>
+
+<!-- 14. 세 마디 -->
+<section class="slide">
+  <h2>세 마디만 기억하자</h2>
+  <ol class="steps three">
+    <li>확인은 매표소 한 곳에서.</li>
+    <li>비밀번호 대신 쿠폰. 세 칸을 적어서.</li>
+    <li>쿠폰은 손목이 아니라 데스크에.</li>
+  </ol>
+  <p class="lead" style="margin-top:48px">다음 → 1회차 SSO. 이제부터 매표소를 IdP, 쿠폰을 토큰이라고 부른다.</p>
+  <aside class="notes">세 문장이 각각 1회차, (2회차+보충), (3회차+A2A)에 대응한다. 여기서 끝내고 1회차로 넘어간다.</aside>
+</section>
+
+</main>
+<script src="assets/slides.js"></script>
+</body>
+</html>

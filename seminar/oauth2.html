@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>보충 A · OAuth 2.0 — 권한을 빌려주는 규칙</title>
+<link rel="stylesheet" href="assets/slides.css">
+</head>
+<body>
+<main class="deck" data-deck="보충 A · OAuth 2.0 — 권한을 빌려주는 규칙" data-index="index.html">
+
+<!-- 1. 제목 -->
+<section class="slide title">
+  <div class="kicker">에이전트 개발자를 위한 인증·인가 세미나 · 보충 자료 A</div>
+  <h1>OAuth 2.0 — 권한을 빌려주는 규칙</h1>
+  <p class="sub">인가 프레임워크: 왜 생겼나 · 승인 방식 · 토큰의 범위와 보호 장치</p>
+  <p class="meta">대상: 1회차(SSO)를 본 에이전트 개발자 · 로그인(누구인지)은 보충 B · 약 35분</p>
+</section>
+
+<!-- 2. 위치와 목표 -->
+<section class="slide">
+  <h2>이 자료의 위치 — 1회차 '개념' 장을 한 단계 깊게</h2>
+  <div class="cols w-3-2 middle">
+    <div>
+      <ul>
+        <li>1회차는 OAuth 2.0을 <strong>로그인에 필요한 만큼만</strong> 다뤘다</li>
+        <li>이 자료는 OAuth 2.0 <strong>자체</strong>를 다룬다 — 왜 생겼고, 승인 방식이 몇 가지이며, 토큰을 어떻게 좁히고 지키는가</li>
+        <li>"누가 로그인했나"는 OAuth 2.0이 답하지 않는다 → <strong>보충 B · OIDC</strong></li>
+        <li>끝나면 Spring 설정의 <code>registration</code> · <code>provider</code> · <code>authorization-grant-type</code>이 규격의 어느 조각인지 읽힌다</li>
+      </ul>
+      <div class="card note">
+        <h3>한 문장 정의</h3>
+        <p>OAuth 2.0은 <strong>비밀번호를 넘기지 않고</strong>, 사용자가 앱에게 <strong>범위가 정해진 열쇠(토큰)</strong>를 빌려주는 절차를 정한 규격이다 (RFC 6749, 2012).</p>
+      </div>
+    </div>
+    <div class="stack">
+      <div class="card">
+        <h3>구성 · 약 35분</h3>
+        <ul class="small">
+          <li>01 왜 생겼나 — 5분</li>
+          <li>02 승인 방식(Grant) — 13분</li>
+          <li>03 토큰과 보호 장치 — 12분</li>
+          <li>Spring 매핑 · 실수 · 요약 — 5분</li>
+        </ul>
+      </div>
+      <div class="card"><h3>전제</h3><p class="small">HTTP 리다이렉트(302)와 <code>Authorization: Bearer</code> 헤더가 무엇인지 안다.</p></div>
+    </div>
+  </div>
+  <aside class="notes">1회차 10~14번 슬라이드(표준 지도, 등장인물 4명, code flow, 토큰 3종)를 전제로 한다. 겹치는 그림은 짧게 지나가고, 1회차에 없던 것(비밀번호 안티패턴, grant 비교, opaque vs JWT, scope/aud, Client 종류)에 시간을 쓴다.</aside>
+</section>
+
+<!-- 3. 섹션 01 -->
+<section class="slide section">
+  <div class="num">01</div>
+  <h2>왜 생겼나</h2>
+  <p>비밀번호를 넘겨주던 시절의 문제</p>
+  <aside class="notes">시간 배분: 이 장 5분 (누적 7분).</aside>
+</section>
+
+<!-- 4. 문제 -->
+<section class="slide">
+  <h2>문제 — 제3자 앱에 비밀번호를 그대로 주던 시절</h2>
+  <div class="cols w-2-3 middle">
+    <div>
+      <p class="lead">2010년 이전, "가계부 앱이 내 은행 거래 내역을 가져오려면?"</p>
+      <ul>
+        <li>앱에 <strong>은행 아이디와 비밀번호</strong>를 입력한다</li>
+        <li>앱이 <strong>나인 척</strong> 은행에 로그인해 긁어 온다</li>
+      </ul>
+      <div class="card bad">
+        <h3>무엇이 문제인가</h3>
+        <ul>
+          <li><strong>전부 아니면 전무</strong> — 조회만 허락할 방법이 없다. 이체도 된다</li>
+          <li><strong>취소 불가</strong> — 앱을 끊으려면 비밀번호를 바꿔야 하고, 그러면 다른 앱도 전부 끊긴다</li>
+          <li><strong>비밀번호가 여러 곳에 저장</strong> — 앱 하나가 뚫리면 은행 계정이 뚫린다</li>
+          <li><strong>MFA·SSO 불가</strong> — 앱이 비밀번호를 대신 치는 구조에서는 2단계 인증을 넣을 수 없다</li>
+        </ul>
+      </div>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 560 330" role="img" aria-label="사용자가 가계부 앱에 은행 비밀번호를 입력하고, 앱이 사용자인 척 은행 API에 로그인한다. 앱은 전체 권한을 얻고 취소할 방법이 없다">
+        <rect x="0" y="20" width="200" height="60" rx="10" class="svg-user"/>
+        <text x="100" y="45" text-anchor="middle" class="svg-text b">사용자 kim</text>
+        <text x="100" y="67" text-anchor="middle" class="svg-text small muted">은행 계정의 주인</text>
+
+        <rect x="0" y="135" width="200" height="60" rx="10" class="svg-app"/>
+        <text x="100" y="160" text-anchor="middle" class="svg-text b">가계부 앱 (제3자)</text>
+        <text x="100" y="182" text-anchor="middle" class="svg-text small muted">비밀번호를 저장해 둔다</text>
+
+        <rect x="0" y="250" width="200" height="60" rx="10" class="svg-app"/>
+        <text x="100" y="275" text-anchor="middle" class="svg-text b">은행 API</text>
+        <text x="100" y="297" text-anchor="middle" class="svg-text small muted">누가 치는지 구분 못 함</text>
+
+        <path d="M100,80 L100,133" class="svg-line bad" marker-end="url(#arrow-bad)"/>
+        <text x="112" y="112" class="svg-text small bad">① 비밀번호를 앱에 입력</text>
+        <path d="M100,195 L100,248" class="svg-line bad" marker-end="url(#arrow-bad)"/>
+        <text x="112" y="227" class="svg-text small bad">② 앱이 kim인 척 로그인</text>
+
+        <rect x="330" y="135" width="210" height="175" rx="10" class="svg-bad-box"/>
+        <text x="346" y="162" class="svg-text b bad">앱이 손에 쥐는 것</text>
+        <text x="346" y="190" class="svg-text small">· 조회뿐 아니라 이체까지</text>
+        <text x="346" y="214" class="svg-text small">· 기한 없음 — 영원히</text>
+        <text x="346" y="238" class="svg-text small">· 비밀번호 원문</text>
+        <text x="346" y="270" class="svg-text small bad">끊으려면? 비밀번호 변경뿐.</text>
+        <text x="346" y="292" class="svg-text small bad">→ 다른 앱도 전부 끊긴다</text>
+      </svg>
+      <figcaption>빨간 화살표 = 비밀번호가 이동하는 경로. 앱은 "범위"도 "기한"도 없는 전권을 얻는다.</figcaption>
+    </figure>
+  </div>
+  <aside class="notes">실제로 2000년대 중반 트위터·구글 API 연동 앱들이 이렇게 했고, 그 반성에서 OAuth 1.0(2007)과 2.0(2012)이 나왔다. 에이전트 시대에 이 문제가 다시 나타난다: 에이전트에게 사용자 비밀번호를 주고 싶어지는 유혹. 별도 자료 A2A에서 다룬다.</aside>
+</section>
+
+<!-- 5. 해결 -->
+<section class="slide">
+  <h2>해결 — 비밀번호 대신 "범위와 기한이 있는 열쇠"를 빌려준다</h2>
+  <div class="cols w-2-3 middle">
+    <div>
+      <ol class="steps compact">
+        <li>앱은 비밀번호를 <strong>보지 않는다</strong>. 사용자를 <strong>Authorization Server</strong>로 보낸다</li>
+        <li>사용자는 거기서 직접 로그인하고, 앱이 요청한 <strong>범위(scope)</strong>에 동의한다</li>
+        <li>앱은 그 범위만 되는 <strong>Access Token</strong>을 받는다</li>
+        <li>API는 토큰을 검증하고, 범위 안의 요청만 들어준다</li>
+      </ol>
+      <table class="compact mt">
+        <thead><tr><th style="width:38%">역할 (RFC 6749)</th><th>이 예에서</th><th>이 시리즈에서</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Resource Owner</strong></td><td>사용자 kim</td><td>사용자</td></tr>
+          <tr><td><strong>Client</strong></td><td>가계부 앱</td><td>Spring 앱 · 에이전트</td></tr>
+          <tr><td><strong>Authorization Server</strong></td><td>은행 인증 서버</td><td>Keycloak</td></tr>
+          <tr><td><strong>Resource Server</strong></td><td>은행 API</td><td>업무 API</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 560 330" role="img" aria-label="사용자가 Authorization Server에서 직접 로그인하고 동의하면, 앱은 범위가 정해진 토큰을 받아 은행 API를 호출한다. 비밀번호는 앱을 거치지 않는다">
+        <rect x="0" y="20" width="200" height="60" rx="10" class="svg-user"/>
+        <text x="100" y="45" text-anchor="middle" class="svg-text b">사용자 kim</text>
+        <text x="100" y="67" text-anchor="middle" class="svg-text small muted">Resource Owner</text>
+
+        <rect x="330" y="20" width="210" height="60" rx="10" class="svg-idp"/>
+        <text x="435" y="45" text-anchor="middle" class="svg-text b">Authorization Server</text>
+        <text x="435" y="67" text-anchor="middle" class="svg-text small muted">로그인 · 동의 · 토큰 발급</text>
+
+        <rect x="0" y="135" width="200" height="60" rx="10" class="svg-app"/>
+        <text x="100" y="160" text-anchor="middle" class="svg-text b">가계부 앱 (Client)</text>
+        <text x="100" y="182" text-anchor="middle" class="svg-text small muted">비밀번호를 모른다</text>
+
+        <rect x="0" y="250" width="200" height="60" rx="10" class="svg-app"/>
+        <text x="100" y="275" text-anchor="middle" class="svg-text b">은행 API (Resource Server)</text>
+        <text x="100" y="297" text-anchor="middle" class="svg-text small muted">토큰을 검증한다</text>
+
+        <path d="M200,50 L328,50" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="264" y="40" text-anchor="middle" class="svg-text small">① 직접 로그인</text>
+        <text x="264" y="70" text-anchor="middle" class="svg-text small">+ 동의</text>
+
+        <path d="M390,80 L205,142" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="310" y="128" class="svg-text small token">② 토큰 (조회만, 15분)</text>
+
+        <path d="M100,195 L100,248" class="svg-line token" marker-end="url(#arrow-token)"/>
+        <text x="112" y="227" class="svg-text small token">③ Bearer 토큰으로 호출</text>
+
+        <rect x="330" y="170" width="210" height="140" rx="10" class="svg-token"/>
+        <text x="346" y="196" class="svg-text b token">Access Token</text>
+        <text x="346" y="222" class="svg-text mono xs">"scope": "accounts:read"</text>
+        <text x="346" y="242" class="svg-text mono xs">"aud":   "bank-api"</text>
+        <text x="346" y="262" class="svg-text mono xs">"exp":   1760000900</text>
+        <text x="346" y="292" class="svg-text xs">범위 · 대상 · 기한이 박혀 있다</text>
+      </svg>
+      <figcaption>앱은 비밀번호 대신 "조회만, bank-api에서만, 15분만" 되는 토큰을 든다. 끊고 싶으면 이 토큰만 취소한다.</figcaption>
+    </figure>
+  </div>
+  <aside class="notes">1회차 11번 슬라이드의 등장인물 4명과 같은 그림이다. 차이는 앞 슬라이드와 나란히 놓고 "빨간 화살표가 사라졌다"를 보여주는 것. OAuth 2.0은 결국 이 한 가지를 위해 존재한다.</aside>
+</section>
+
+<!-- 6. 섹션 02 -->
+<section class="slide section">
+  <div class="num">02</div>
+  <h2>승인 방식 (Grant)</h2>
+  <p>토큰을 받는 길은 여러 갈래 — 사람이 있느냐 없느냐로 갈린다</p>
+  <aside class="notes">시간 배분: 이 장 13분 (누적 20분). grant 지도 2분, code 흐름 HTTP 4분, client credentials 3분, refresh 2분, 폐기된 방식 2분.</aside>
+</section>
+
+<!-- 7. Grant 지도 -->
+<section class="slide">
+  <h2>Grant 지도 — 6가지 중 쓰는 건 둘, 버린 건 둘</h2>
+  <table class="compact">
+    <thead><tr><th style="width:24%">승인 방식</th><th style="width:13%">사용자</th><th style="width:22%">누가 쓰나</th><th>어떻게</th><th style="width:9%">상태</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Authorization Code</strong> (+PKCE)</td><td>있음 (브라우저)</td><td>웹앱 · SPA · 모바일 · BFF</td><td>302로 로그인 → <code>code</code> → 백 채널에서 토큰 교환</td><td class="ok">표준</td></tr>
+      <tr><td><strong>Client Credentials</strong></td><td>없음</td><td>배치 · 서비스 간 · <strong>에이전트</strong></td><td><code>client_id</code> + <code>secret</code>으로 바로 토큰</td><td class="ok">표준</td></tr>
+      <tr><td><strong>Refresh Token</strong></td><td>(로그인 때 받음)</td><td>위 둘을 쓰는 모든 Client</td><td>refresh → 새 access (사용자 개입 없음)</td><td class="ok">표준</td></tr>
+      <tr><td><strong>Device Code</strong></td><td>있음 (다른 기기)</td><td>TV · CLI · 입력 장치 없는 기기</td><td>화면에 코드 표시 → 폰에서 승인</td><td class="ok">표준</td></tr>
+      <tr><td><strong>Implicit</strong></td><td>있음</td><td>(옛) SPA</td><td>토큰을 URL fragment로 직접 전달</td><td class="bad">폐기</td></tr>
+      <tr><td><strong>Password</strong> (ROPC)</td><td>있음</td><td>(옛) 자사 앱</td><td>앱이 비밀번호를 받아 토큰과 교환</td><td class="bad">폐기</td></tr>
+    </tbody>
+  </table>
+  <div class="cols mt">
+    <div class="card note">
+      <h3>이 시리즈에서 쓰는 둘</h3>
+      <p><strong>사람이 있으면 Authorization Code, 없으면 Client Credentials.</strong> 2회차에서 Keycloak으로 둘 다 발급해 보고, 별도 자료 A2A에서 에이전트가 둘 사이를 오가는 문제(위임)를 다룬다.</p>
+    </div>
+    <div class="card warn">
+      <h3>고르는 기준은 하나</h3>
+      <p>"이 토큰은 <strong>누구의 권한</strong>인가?" 사용자의 권한이면 사용자가 직접 로그인해야 하고(code), 앱 자체의 권한이면 앱이 자기 자격으로 받는다(client credentials).</p>
+    </div>
+  </div>
+  <aside class="notes">Device Code는 에이전트 CLI 도구에서 의외로 자주 만난다(gh auth login이 이 방식). 표에는 넣되 시간은 쓰지 않는다. Implicit과 ROPC는 11번 슬라이드에서 왜 버렸는지만 설명한다.</aside>
+</section>
+
+<!-- 8. Authorization Code HTTP -->
+<section class="slide">
+  <h2>Authorization Code — 실제 HTTP 4개</h2>
+  <div class="cols">
+    <div>
+      <p class="code-title">① 브라우저 → AS (302의 목적지)</p>
+<pre class="small"><code class="lang-http">GET /realms/company/protocol/openid-connect/auth
+    ?response_type=code
+    &amp;client_id=agent-portal
+    &amp;redirect_uri=https://app/login/oauth2/code/keycloak
+    &amp;scope=accounts:read          # OIDC면 openid 추가
+    &amp;state=af0ifjsldkj            # 요청·응답 짝 맞추기
+    &amp;code_challenge=E9Melhoa…     # PKCE
+    &amp;code_challenge_method=S256</code></pre>
+      <p class="code-title mt">② AS → 브라우저 (로그인·동의 후)</p>
+<pre class="small"><code class="lang-http">HTTP/1.1 302 Found
+Location: https://app/login/oauth2/code/keycloak
+          ?code=SplxlOBeZQQYbYS6WxSbIA&amp;state=af0ifjsldkj</code></pre>
+    </div>
+    <div>
+      <p class="code-title">③ 앱 서버 → AS (백 채널)</p>
+<pre class="small"><code class="lang-http">POST /realms/company/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+Authorization: Basic base64(client_id:client_secret)
+
+grant_type=authorization_code
+&amp;code=SplxlOBeZQQYbYS6WxSbIA
+&amp;redirect_uri=https://app/login/oauth2/code/keycloak
+&amp;code_verifier=dBjftJeZ4CVP-mB92K27uhbUJU1p1r…</code></pre>
+      <p class="code-title mt">④ 응답 (JSON)</p>
+<pre class="small"><code class="lang-json">{ "access_token": "eyJhbGciOiJSUzI1NiIs…",
+  "token_type": "Bearer", "expires_in": 300,
+  "refresh_token": "eyJhbGciOiJIUzI1NiIs…",
+  "scope": "accounts:read" }</code></pre>
+    </div>
+  </div>
+  <p class="small muted mt">①②는 브라우저 주소창에 보인다. ③④는 서버끼리만. ③에서 <code>redirect_uri</code>를 다시 보내는 이유: ①과 같은지 비교해 code 바꿔치기를 막기 위해.</p>
+  <aside class="notes">1회차 12번 시퀀스 그림의 ②④⑥⑦을 실제 바이트로 보여주는 슬라이드. 주소창에 보이는 것(code, state)과 안 보이는 것(secret, verifier, 토큰)을 색으로 구분하지 않아도 좌우 칼럼으로 나뉜다. Keycloak 경로에 openid-connect가 들어가지만 scope에 openid가 없으면 순수 OAuth 2.0으로 동작한다.</aside>
+</section>
+
+<!-- 9. Client Credentials -->
+<section class="slide">
+  <h2>Client Credentials — 사람이 없을 때, 앱 자신의 권한으로</h2>
+  <div class="cols">
+    <div>
+      <p class="code-title">HTTP 1개로 끝난다</p>
+<pre class="small"><code class="lang-http">POST /realms/company/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+Authorization: Basic base64(client_id:client_secret)
+
+grant_type=client_credentials
+&amp;scope=report:write
+
+HTTP/1.1 200 OK
+{ "access_token": "eyJhbGciOi…", "token_type": "Bearer",
+  "expires_in": 300 }                # refresh_token 없음</code></pre>
+      <p class="code-title mt">Spring — registration 하나 더</p>
+<pre class="small"><code class="lang-yaml">spring.security.oauth2.client.registration:
+  report-agent:
+    client-id: report-agent
+    client-secret: ${REPORT_AGENT_SECRET}
+    authorization-grant-type: client_credentials
+    scope: report:write
+    provider: keycloak            # 같은 provider 재사용</code></pre>
+    </div>
+    <div class="stack">
+      <div class="card note">
+        <h3>무엇이 다른가</h3>
+        <ul>
+          <li>리다이렉트도, 로그인 화면도, 동의도 <strong>없다</strong></li>
+          <li>토큰의 주체(<code>sub</code>)는 사용자가 아니라 <strong>앱 자신</strong> — Keycloak에서는 Service Account</li>
+          <li><strong>refresh token이 없다</strong>. 만료되면 그냥 다시 받는다 (secret이 곧 갱신 자격)</li>
+        </ul>
+      </div>
+      <div class="card warn">
+        <h3>에이전트의 기본 자세, 그러나</h3>
+        <p>배치·야간 작업·시스템 간 호출에는 이게 맞다. 그런데 <strong>"kim 대신" 하는 일</strong>을 이 토큰으로 하면 API는 kim을 모른다 — 감사 로그에 에이전트만 남는다. 그 간극이 별도 자료 A2A(위임, Token Exchange)의 주제다.</p>
+      </div>
+      <div class="card">
+        <h3>Spring에서 쓰기</h3>
+        <p class="small"><code>OAuth2AuthorizedClientManager</code>가 만료를 보고 알아서 재발급. 2회차 코드 참조.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">"에이전트는 전부 client credentials면 되는 거 아니냐"는 질문이 나오면 warn 카드로 답한다. 맞는 경우와 틀린 경우의 경계가 '누구의 권한인가'다. 2회차에서 Keycloak Service Account를 실제로 만든다.</aside>
+</section>
+
+<!-- 10. Refresh Token -->
+<section class="slide">
+  <h2>Refresh Token — 짧은 Access Token을 조용히 이어 붙인다</h2>
+  <div class="cols w-3-2 middle">
+    <figure class="diagram">
+      <svg viewBox="0 0 660 250" role="img" aria-label="로그인 시각 0분에 받은 5분짜리 access token이 만료될 때마다 refresh token으로 새 access token을 받는 타임라인. 사용자는 갱신을 모르고, SSO 세션이 끝나는 30분에 refresh도 거부된다">
+        <line x1="30" y1="150" x2="640" y2="150" class="svg-line muted"/>
+        <text x="30" y="178" class="svg-text small muted">0분</text>
+        <text x="130" y="178" class="svg-text small muted">5분</text>
+        <text x="230" y="178" class="svg-text small muted">10분</text>
+        <text x="330" y="178" class="svg-text small muted">15분</text>
+        <text x="655" y="178" text-anchor="end" class="svg-text small muted">30분 idle</text>
+        <line x1="30" y1="144" x2="30" y2="156" class="svg-line muted"/>
+        <line x1="130" y1="144" x2="130" y2="156" class="svg-line muted"/>
+        <line x1="230" y1="144" x2="230" y2="156" class="svg-line muted"/>
+        <line x1="330" y1="144" x2="330" y2="156" class="svg-line muted"/>
+        <line x1="630" y1="144" x2="630" y2="156" class="svg-line bad"/>
+
+        <rect x="30" y="60" width="96" height="36" rx="6" class="svg-token"/>
+        <text x="78" y="83" text-anchor="middle" class="svg-text small b token">access #1</text>
+        <rect x="130" y="60" width="96" height="36" rx="6" class="svg-token"/>
+        <text x="178" y="83" text-anchor="middle" class="svg-text small b token">access #2</text>
+        <rect x="230" y="60" width="96" height="36" rx="6" class="svg-token"/>
+        <text x="278" y="83" text-anchor="middle" class="svg-text small b token">access #3</text>
+        <rect x="330" y="60" width="96" height="36" rx="6" class="svg-ghost"/>
+        <text x="378" y="83" text-anchor="middle" class="svg-text small muted">…</text>
+
+        <rect x="30" y="20" width="600" height="26" rx="6" class="svg-idp"/>
+        <text x="330" y="38" text-anchor="middle" class="svg-text small b idp">refresh token · SSO 세션 (idle 30분, 쓸 때마다 연장)</text>
+
+        <path d="M126,100 L130,100 L130,120" class="svg-line idp" marker-end="url(#arrow-idp)"/>
+        <text x="132" y="118" class="svg-text xs idp">refresh</text>
+        <path d="M226,100 L230,100 L230,120" class="svg-line idp" marker-end="url(#arrow-idp)"/>
+        <text x="232" y="118" class="svg-text xs idp">refresh</text>
+        <path d="M326,100 L330,100 L330,120" class="svg-line idp" marker-end="url(#arrow-idp)"/>
+        <text x="332" y="118" class="svg-text xs idp">refresh</text>
+
+        <text x="30" y="215" class="svg-text small">사용자는 갱신을 모른다 — 화면은 한 번도 끊기지 않는다</text>
+        <text x="30" y="237" class="svg-text small bad">30분 동안 아무것도 안 하면 refresh도 거부 → 그때 다시 로그인</text>
+      </svg>
+      <figcaption>Keycloak 기본값: access 5분 · SSO 세션 idle 30분 · 최대 10시간.</figcaption>
+    </figure>
+    <div class="stack">
+      <p class="code-title">갱신 요청 (백 채널)</p>
+<pre class="small"><code class="lang-http">POST /…/token
+Authorization: Basic base64(client_id:secret)
+
+grant_type=refresh_token
+&amp;refresh_token=eyJhbGciOiJIUzI1…
+
+→ 새 access_token + 새 refresh_token</code></pre>
+      <div class="card warn">
+        <h3>Rotation</h3>
+        <p class="small">갱신할 때마다 <strong>refresh token도 새로 발급</strong>하고 옛것은 폐기. 옛것이 다시 쓰이면 탈취로 보고 <strong>계열 전체를 취소</strong>한다. Keycloak: Revoke Refresh Token 옵션.</p>
+      </div>
+      <div class="card">
+        <p class="small"><strong>보관 규칙:</strong> 서버 세션에만. 브라우저·로그·URL에 나오면 안 된다. 이게 3회차 BFF가 필요한 이유의 절반이다.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">"access 5분이면 사용자가 5분마다 로그인하냐"는 오해를 그림으로 푼다. 짧은 access + 긴 refresh의 조합이 '탈취 피해 창은 짧게, 사용자 경험은 길게'를 동시에 만족시킨다. 3회차에서 Spring이 이 갱신을 어떻게 자동으로 하는지 본다.</aside>
+</section>
+
+<!-- 11. 폐기된 방식 -->
+<section class="slide">
+  <h2>왜 Implicit과 Password를 버렸나 — 그리고 OAuth 2.1</h2>
+  <div class="cols">
+    <div class="card bad">
+      <h3>❌ Implicit — 토큰을 브라우저 URL로</h3>
+      <p class="small"><code>#access_token=eyJ…</code> 처럼 fragment에 실어 보냈다. 서버 없는 SPA를 위한 지름길.</p>
+      <ul>
+        <li>토큰이 히스토리 · Referer · 확장 프로그램에 노출</li>
+        <li>발급 과정에 Client 인증이 없다 — 누가 받아 가는지 확인 불가</li>
+        <li>refresh token을 줄 수 없어 UX도 나빴다</li>
+      </ul>
+      <p class="small"><strong>대체:</strong> Code + PKCE. SPA는 BFF(3회차)로.</p>
+    </div>
+    <div class="card bad">
+      <h3>❌ Password (ROPC) — 앱이 비밀번호를 받는다</h3>
+      <p class="small">앱 화면에 아이디·비밀번호를 입력받아 토큰과 교환. "자사 앱이니까 괜찮다"는 논리.</p>
+      <ul>
+        <li>4번 슬라이드의 문제가 전부 되살아난다 — OAuth의 존재 이유를 부정</li>
+        <li>MFA · 소셜 로그인 · 비밀번호 없는 로그인이 전부 불가</li>
+        <li>앱 코드에 비밀번호가 지나간다 — 로그에 남기 쉽다</li>
+      </ul>
+      <p class="small"><strong>대체:</strong> 사람은 Code, 에이전트는 Client Credentials.</p>
+    </div>
+  </div>
+  <div class="card note mt">
+    <h3>OAuth 2.1 (draft) = 2.0 + 10년치 보안 권고(BCP)를 본문에 합친 것</h3>
+    <p class="small">PKCE를 모든 Client에 필수 · Implicit과 ROPC 삭제 · <code>redirect_uri</code>는 문자열 완전 일치 · Bearer 토큰을 쿼리 스트링에 금지 · refresh token은 rotation 또는 sender-constrained. 새 기능이 아니라 "이미 그렇게 해야 했던 것"의 정리다. MCP 인증(A2A 자료)이 2.1을 요구한다.</p>
+  </div>
+  <aside class="notes">ROPC는 Keycloak에서 "Direct Access Grants" 체크박스다. 기본값이 켜져 있는 버전이 있으니 2회차에서 끄는 것을 보여준다. 테스트 자동화에서 ROPC를 쓰고 싶어하는데, 그것도 client credentials나 테스트용 토큰 발급으로 바꾼다.</aside>
+</section>
+
+<!-- 12. 섹션 03 -->
+<section class="slide section">
+  <div class="num">03</div>
+  <h2>토큰과 보호 장치</h2>
+  <p>Bearer의 의미 · 범위를 좁히는 두 축 · 흐름을 지키는 네 가지</p>
+  <aside class="notes">시간 배분: 이 장 12분 (누적 32분). Bearer/형식 3분, scope·aud 4분, 보호 장치 3분, Client 종류 2분.</aside>
+</section>
+
+<!-- 13. Access Token과 Bearer -->
+<section class="slide">
+  <h2>Access Token — "Bearer"는 가진 사람이 임자라는 뜻</h2>
+  <div class="cols w-2-3">
+    <div class="stack">
+      <div class="card warn">
+        <h3>Bearer = 소지자</h3>
+        <p class="small">지하철 승차권과 같다. 누가 내는지 묻지 않는다. 그래서 <strong>훔치면 그대로 쓸 수 있다.</strong> 방어는 셋뿐: TLS · 짧은 수명 · 로그와 URL에 남기지 않기.</p>
+      </div>
+      <div class="card note">
+        <h3>규격은 토큰의 생김새를 정하지 않는다</h3>
+        <p class="small">RFC 6749에는 JWT라는 단어가 없다. Authorization Server가 알아보기만 하면 된다. JWT 형식의 access token은 별도 규격(RFC 9068).</p>
+      </div>
+      <div class="card">
+        <p class="small"><strong>Keycloak은 JWT.</strong> 그래서 API가 Keycloak에 묻지 않고 공개키로 검증한다(1회차 16번). 대신 취소가 즉시 반영되지 않으니 수명을 짧게 둔다.</p>
+      </div>
+    </div>
+    <div>
+      <table class="compact">
+        <thead><tr><th style="width:22%"></th><th>Opaque (불투명) 토큰</th><th>JWT (자기 서술) 토큰</th></tr></thead>
+        <tbody>
+          <tr><td>생김새</td><td>난수 문자열 <code>2YotnFZFEjr1zCsicMWp</code></td><td><code>eyJhbGciOi…</code> — 서명된 JSON</td></tr>
+          <tr><td>API가 검증하는 법</td><td>AS의 <strong>Introspection</strong> 엔드포인트에 매번 묻는다 (RFC 7662)</td><td>AS 공개키(JWKS)로 <strong>로컬</strong> 서명 검증</td></tr>
+          <tr><td>요청당 네트워크</td><td>1회 (AS 호출)</td><td>0회 (키는 캐시)</td></tr>
+          <tr><td>취소</td><td>즉시 반영</td><td>만료(<code>exp</code>)까지 유효</td></tr>
+          <tr><td>내용 노출</td><td>없음 — AS만 안다</td><td>payload는 Base64, 누구나 읽는다</td></tr>
+          <tr><td>적합</td><td>민감하고 취소가 중요한 곳</td><td>마이크로서비스 · 고트래픽 API</td></tr>
+        </tbody>
+      </table>
+      <p class="small muted mt">둘을 섞기도 한다: 브라우저 밖으로 나가는 토큰은 opaque, 내부 서비스 간에는 JWT ("phantom token" 패턴).</p>
+    </div>
+  </div>
+  <aside class="notes">JWT의 payload를 읽을 수 있다는 점 때문에 "토큰에 개인정보를 넣지 말라"는 원칙이 나온다. Keycloak 기본 access token에 email·name이 들어가는데, 2회차에서 Mapper로 뺄 수 있음을 보여준다.</aside>
+</section>
+
+<!-- 14. scope와 aud -->
+<section class="slide">
+  <h2>범위를 좁히는 두 축 — scope는 "무엇을", aud는 "어디에"</h2>
+  <div class="cols w-2-3 middle">
+    <div>
+      <ul>
+        <li><strong>scope</strong> — 할 수 있는 <em>동작</em>. Client가 요청, 사용자가 동의, AS가 <strong>줄일 수</strong> 있다. 결과는 응답의 <code>scope</code></li>
+        <li><strong>aud</strong> — 받아 줄 <em>API</em>. 없으면 같은 AS의 토큰이 <strong>어느 API에나</strong> 통과</li>
+        <li>aud 지정: 요청에 <code>resource=…</code> (RFC 8707). Keycloak은 Audience Mapper</li>
+        <li>API의 판정: aud 불일치 <strong>401</strong>, scope 부족 <strong>403</strong></li>
+      </ul>
+      <div class="card note">
+        <p class="small">Spring: scope → <code>SCOPE_xxx</code> 권한 자동. <strong>aud는 기본 검사 안 함</strong> → <code>JwtDecoder</code> validator (2회차).</p>
+      </div>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 560 330" role="img" aria-label="scope가 accounts:read이고 aud가 bank-api인 토큰은 bank-api의 조회에는 200, 이체에는 403, report-api에는 401을 받는다">
+        <rect x="20" y="110" width="200" height="110" rx="10" class="svg-token"/>
+        <text x="36" y="136" class="svg-text b token">Access Token</text>
+        <text x="36" y="162" class="svg-text mono xs">"scope": "accounts:read"</text>
+        <text x="36" y="182" class="svg-text mono xs">"aud":   "bank-api"</text>
+        <text x="36" y="208" class="svg-text xs muted">무엇을 ↑        어디에 ↑</text>
+
+        <rect x="340" y="20" width="200" height="80" rx="10" class="svg-app"/>
+        <text x="440" y="46" text-anchor="middle" class="svg-text b">bank-api</text>
+        <text x="440" y="68" text-anchor="middle" class="svg-text mono xs">GET /accounts</text>
+        <text x="440" y="88" text-anchor="middle" class="svg-text small ok">200 — scope · aud 모두 OK</text>
+
+        <rect x="340" y="125" width="200" height="80" rx="10" class="svg-app"/>
+        <text x="440" y="151" text-anchor="middle" class="svg-text b">bank-api</text>
+        <text x="440" y="173" text-anchor="middle" class="svg-text mono xs">POST /transfer</text>
+        <text x="440" y="193" text-anchor="middle" class="svg-text small bad">403 — scope 부족</text>
+
+        <rect x="340" y="230" width="200" height="80" rx="10" class="svg-app"/>
+        <text x="440" y="256" text-anchor="middle" class="svg-text b">report-api</text>
+        <text x="440" y="278" text-anchor="middle" class="svg-text mono xs">GET /reports</text>
+        <text x="440" y="298" text-anchor="middle" class="svg-text small bad">401 — aud 불일치</text>
+
+        <path d="M220,150 L338,60" class="svg-line ok" marker-end="url(#arrow-ok)"/>
+        <path d="M220,165 L338,165" class="svg-line bad dashed" marker-end="url(#arrow-bad)"/>
+        <path d="M220,180 L338,270" class="svg-line bad dashed" marker-end="url(#arrow-bad)"/>
+      </svg>
+      <figcaption>같은 토큰이라도 동작(scope)과 대상(aud)이 어긋나면 거절된다. 둘 다 좁을수록 탈취 피해가 작다.</figcaption>
+    </figure>
+  </div>
+  <aside class="notes">1회차 '자주 하는 실수'의 aud 미검증을 원리 쪽에서 다시 본다. 에이전트가 여러 API를 부를 때 토큰 하나로 다 부르고 싶어지는데, A2A 자료의 '최소 aud' 원칙이 여기서 나온다.</aside>
+</section>
+
+<!-- 15. 보호 장치 -->
+<section class="slide">
+  <h2>흐름을 지키는 네 가지 — 하나라도 빠지면 code가 열쇠가 된다</h2>
+  <div class="cols">
+    <div class="card ok">
+      <h3>✅ state — 요청과 응답을 짝짓는다</h3>
+      <p class="small">앱이 난수를 만들어 ①에 보내고 세션에 둔다. 콜백 ②의 <code>state</code>가 다르면 버린다.<br><strong>막는 것:</strong> 공격자가 <em>자기</em> code를 내 브라우저에 심어, 내 세션을 공격자 계정에 묶는 로그인 CSRF.</p>
+    </div>
+    <div class="card ok">
+      <h3>✅ PKCE — code를 훔쳐도 못 바꾼다</h3>
+      <p class="small">난수 <code>code_verifier</code>의 해시를 ①에, 원본을 ③에. 해시만 본 쪽은 원본을 모른다.<br><strong>막는 것:</strong> 리다이렉트 URL에서 code 가로채기 (모바일 커스텀 스킴, 악성 확장). 2.1에서 <strong>모든 Client 필수</strong>.</p>
+    </div>
+  </div>
+  <div class="cols mt">
+    <div class="card ok">
+      <h3>✅ redirect_uri 완전 일치</h3>
+      <p class="small">AS는 등록된 URI와 <strong>문자열이 똑같을 때만</strong> code를 보낸다. 와일드카드·접두사 일치 금지.<br><strong>막는 것:</strong> <code>https://app/*</code>로 등록해 두면 앱 안의 open redirect 하나로 code가 외부로 흘러간다.</p>
+    </div>
+    <div class="card ok">
+      <h3>✅ 1회용 · 짧은 code, 짧은 토큰</h3>
+      <p class="small">code는 1회 사용 후 폐기, 수명 약 1분. 같은 code가 두 번 오면 그 code로 발급한 토큰까지 취소.<br><strong>막는 것:</strong> 로그·히스토리에서 code를 주워 뒤늦게 교환하기.</p>
+    </div>
+  </div>
+  <div class="card warn mt">
+    <p class="small"><strong>Keycloak 주의:</strong> Valid Redirect URIs에 <code>*</code>나 <code>http://localhost:*</code>를 운영 realm에 남겨 두는 실수가 가장 흔하다. Spring은 state와 PKCE를 자동으로 만들지만, <strong>secret이 있는 Client에는 PKCE를 자동으로 켜지 않는다</strong> — <code>OAuth2AuthorizationRequestCustomizers.withPkce()</code>로 명시.</p>
+  </div>
+  <aside class="notes">각 장치가 '어떤 공격을' 막는지를 한 줄씩 붙였다. 네 가지는 서로 다른 구멍을 막기 때문에 하나가 다른 하나를 대신하지 못한다. Spring의 PKCE 자동 적용 조건은 공식 문서 기준: client-authentication-method가 none이거나 secret이 없을 때.</aside>
+</section>
+
+<!-- 16. Client 종류 -->
+<section class="slide">
+  <h2>Client 두 종류 — secret을 지킬 수 있느냐로 갈린다</h2>
+  <table>
+    <thead><tr><th style="width:18%"></th><th>Confidential (기밀) Client</th><th>Public (공개) Client</th></tr></thead>
+    <tbody>
+      <tr><td>정의</td><td>secret을 <strong>서버에</strong> 안전하게 둘 수 있다</td><td>코드가 사용자 손에 있어 secret을 숨길 수 없다</td></tr>
+      <tr><td>예</td><td>Spring 서버 앱 · BFF · 배치 · <strong>에이전트 서버</strong></td><td>SPA(브라우저 JS) · 모바일 앱 · CLI</td></tr>
+      <tr><td>Client 인증</td><td><code>client_secret</code> (Basic 헤더) 또는 <code>private_key_jwt</code></td><td>없음 — <code>client_id</code>만</td></tr>
+      <tr><td>PKCE</td><td>권장 (2.1: 필수)</td><td><strong>필수</strong> — 유일한 code 보호 수단</td></tr>
+      <tr><td>Client Credentials</td><td>가능</td><td><strong>불가</strong> — 증명할 자격이 없다</td></tr>
+      <tr><td>Keycloak 설정</td><td>Client authentication: <strong>On</strong></td><td>Client authentication: <strong>Off</strong></td></tr>
+    </tbody>
+  </table>
+  <div class="cols mt">
+    <div class="card note">
+      <h3>이 시리즈의 선택</h3>
+      <p class="small">FE가 SPA여도 토큰은 <strong>BFF(Confidential)</strong>가 들게 한다(3회차). 에이전트는 서버에서 돌리는 한 Confidential — secret을 환경 변수·Vault에 두고 주기적으로 회전한다.</p>
+    </div>
+    <div class="card warn">
+      <h3>secret을 Public Client에 심으면</h3>
+      <p class="small">JS 번들·APK에서 10초면 꺼낸다. 그 순간 누구나 그 Client 행세를 할 수 있다. "숨겨 두면 괜찮다"는 가정이 성립하지 않는 쪽이 Public이다.</p>
+    </div>
+  </div>
+  <aside class="notes">Keycloak 콘솔에서 Client 만들 때 가장 먼저 묻는 토글이 Client authentication이다. 이 슬라이드가 그 토글의 의미다. 2회차에서 실제로 켜고 끈다.</aside>
+</section>
+
+<!-- 17. Spring 매핑 -->
+<section class="slide">
+  <h2>Spring Security에 대응시키기 — 규격 용어 → 설정 키</h2>
+  <div class="cols w-3-2">
+    <table class="compact">
+      <thead><tr><th style="width:34%">OAuth 2.0</th><th>Spring Security 6</th></tr></thead>
+      <tbody>
+        <tr><td>Client 역할</td><td><code>spring-boot-starter-oauth2-client</code> · <code>oauth2Login()</code> / <code>oauth2Client()</code></td></tr>
+        <tr><td>Resource Server 역할</td><td><code>spring-boot-starter-oauth2-resource-server</code> · <code>oauth2ResourceServer()</code></td></tr>
+        <tr><td>Authorization Server</td><td>Keycloak (또는 Spring Authorization Server)</td></tr>
+        <tr><td><code>client_id</code> / <code>client_secret</code></td><td><code>registration.{id}.client-id</code> / <code>.client-secret</code></td></tr>
+        <tr><td>승인 방식</td><td><code>registration.{id}.authorization-grant-type</code> (기본 <code>authorization_code</code>)</td></tr>
+        <tr><td><code>scope</code></td><td><code>registration.{id}.scope</code> → 권한 <code>SCOPE_xxx</code></td></tr>
+        <tr><td><code>redirect_uri</code></td><td><code>{baseUrl}/login/oauth2/code/{id}</code> (기본값)</td></tr>
+        <tr><td>authorize / token 주소</td><td><code>provider.{id}.issuer-uri</code>로 자동 발견 (Discovery, 보충 B) 또는 <code>.authorization-uri</code> / <code>.token-uri</code> 직접</td></tr>
+      </tbody>
+    </table>
+    <div>
+      <p class="code-title">spring.security.oauth2.client — registration 둘</p>
+<pre class="small" style="font-size:12.5px"><code class="lang-yaml">registration:
+  keycloak:                 # 사람: code flow
+    client-id: agent-portal
+    client-secret: ${PORTAL_SECRET}
+    scope: openid, profile, email
+  report-agent:             # 에이전트
+    client-id: report-agent
+    client-secret: ${AGENT_SECRET}
+    authorization-grant-type: client_credentials
+    scope: report:write
+    provider: keycloak
+provider:
+  keycloak:                 # 1회차와 같은 값
+    issuer-uri: ${KC_ISSUER}
+    # = https://kc.company.com/realms/company</code></pre>
+      <p class="small muted">같은 Keycloak, 같은 provider, 서로 다른 Client 둘. 1회차 설정에 아래 블록 하나가 더 붙은 것이다.</p>
+    </div>
+  </div>
+  <aside class="notes">issuer-uri 한 줄로 끝나는 것은 OAuth 2.0이 아니라 OIDC Discovery 덕분이다. 순수 OAuth 2.0 서버(예: GitHub)는 authorization-uri, token-uri를 손으로 적어야 한다. 이 차이가 보충 B로 넘어가는 연결 고리다.</aside>
+</section>
+
+<!-- 18. 자주 하는 실수 -->
+<section class="slide">
+  <h2>자주 하는 실수</h2>
+  <div class="cols c-3">
+    <div class="card bad"><h3>❌ "간단하니까" ROPC</h3><p>앱 로그인 폼에서 비밀번호를 받아 토큰 교환. 4번 슬라이드의 문제가 전부 되살아나고, MFA를 영영 못 넣는다.</p></div>
+    <div class="card bad"><h3>❌ redirect_uri 와일드카드</h3><p><code>https://app/*</code> 등록. 앱 안의 open redirect 하나로 code가 공격자에게 간다. 운영 realm에서 <code>localhost</code>도 지울 것.</p></div>
+    <div class="card bad"><h3>❌ access token으로 "누구인지" 판단</h3><p>access token은 API용 열쇠다. 앱이 그 안의 <code>email</code>을 읽어 로그인 처리하면 토큰 바꿔치기에 뚫린다 → 보충 B.</p></div>
+  </div>
+  <div class="cols c-3 mt">
+    <div class="card bad"><h3>❌ scope를 항상 최대로</h3><p>"나중에 쓸지 모르니" 전부 요청. 탈취 피해 범위가 그만큼 커진다. 동작마다 필요한 scope만, 에이전트는 더 좁게.</p></div>
+    <div class="card bad"><h3>❌ secret을 SPA · 모바일에</h3><p>번들에서 바로 꺼낸다. Public Client에는 secret 없이 PKCE, 또는 BFF로 Confidential화.</p></div>
+    <div class="card bad"><h3>❌ 토큰을 쿼리 스트링 · 로그에</h3><p>Bearer는 가진 자가 임자. 접근 로그 한 줄이 곧 탈취다. 헤더로만, 로그에는 마스킹.</p></div>
+  </div>
+  <aside class="notes">1회차 실수 슬라이드와 겹치지 않게 '흐름' 쪽 실수만 모았다. 세 번째 카드가 보충 B의 도입부다.</aside>
+</section>
+
+<!-- 19. 요약 -->
+<section class="slide">
+  <h2>요약 · 다음 자료</h2>
+  <div class="cols w-3-2">
+    <ul class="checklist">
+      <li>OAuth 2.0 = 비밀번호 대신 <strong>범위·대상·기한이 있는 토큰</strong>을 빌려주는 절차</li>
+      <li>승인 방식은 "누구의 권한인가"로 고른다 — 사람은 <strong>Code+PKCE</strong>, 앱 자신은 <strong>Client Credentials</strong></li>
+      <li>Implicit · Password는 폐기. OAuth 2.1은 그 정리본</li>
+      <li>Access Token은 <strong>Bearer</strong> — 짧게, TLS로, 로그 밖으로. refresh로 이어 붙인다</li>
+      <li>scope는 무엇을, <strong>aud는 어디에</strong>. 둘 다 좁게. aud 검사는 Spring에서 직접 켠다</li>
+      <li>state · PKCE · redirect_uri 완전 일치 · 1회용 code — 서로 다른 구멍을 막는다</li>
+      <li>secret을 지킬 수 있으면 Confidential, 아니면 Public(PKCE 필수) 또는 BFF</li>
+    </ul>
+    <div class="stack">
+      <div class="card note big">
+        <h3>보충 B — OIDC</h3>
+        <p>OAuth 2.0은 "이 앱이 뭘 해도 되나"까지만 답한다. "<strong>지금 로그인한 사람이 누구인가</strong>"를 표준으로 답하려고 그 위에 얹은 것이 OIDC다. ID Token · 표준 claim · Discovery · 로그아웃.</p>
+      </div>
+      <div class="card">
+        <h3>본편으로 돌아가면</h3>
+        <p class="small">2회차: Keycloak에서 Client 둘(사람용·에이전트용) 만들기 · 3회차: refresh를 BFF가 대신 · 별도 A2A: Client Credentials만으로 부족한 이유.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+<script src="assets/slides.js"></script>
+</body>
+</html>

@@ -53,7 +53,7 @@
       <h3>오늘 다루지 않는 것</h3>
       <ul>
         <li>브라우저(FE)에 토큰을 두는 문제 → 3회차 BFF</li>
-        <li>에이전트가 사용자를 대신하는 문제 → 4회차 A2A</li>
+        <li>에이전트가 사용자를 대신하는 문제 → 별도 자료 A2A</li>
         <li>운영 배포(HA, DB, TLS) → 참고 자료</li>
       </ul>
     </div>
@@ -287,7 +287,7 @@
       <text x="718" y="230" class="svg-text mono xs">"sub": "7f3c…",  "preferred_username":</text>
       <text x="718" y="248" class="svg-text mono xs">&#160;&#160;&#160;&#160;"service-account-report-agent",  "azp": "report-agent"</text>
       <text x="718" y="266" class="svg-text mono xs">"realm_access": { "roles": ["agent:report"] }</text>
-      <text x="718" y="284" class="svg-text xs muted">에이전트 자신의 역할 · 누구를 대신하는지는 없다 (→ 4회차)</text>
+      <text x="718" y="284" class="svg-text xs muted">에이전트 자신의 역할 · 누구를 대신하는지는 없다 (→ A2A 자료)</text>
     </svg>
     <figcaption>Service accounts를 켜면 Keycloak이 <code>service-account-&lt;client_id&gt;</code>라는 숨은 사용자를 만들고, 그 사용자에게 역할을 매핑한다. 에이전트 토큰의 <code>sub</code>는 이 숨은 사용자다.</figcaption>
   </figure>
@@ -756,7 +756,7 @@ static class AudienceValidator implements OAuth2TokenValidator&lt;Jwt&gt; {
       </div>
     </div>
   </div>
-  <aside class="notes">4회차 "aud 불일치 → 거절" 그림의 구현이 바로 이 코드. 토큰이 "어느 API를 위해 발급되었는가"를 API 스스로 확인하는 것이며, 멀티 에이전트에서 토큰을 서로 돌려쓰는 것을 막는 장치다.</aside>
+  <aside class="notes">A2A 자료의 "aud 불일치 → 거절" 그림의 구현이 바로 이 코드. 토큰이 "어느 API를 위해 발급되었는가"를 API 스스로 확인하는 것이며, 멀티 에이전트에서 토큰을 서로 돌려쓰는 것을 막는 장치다.</aside>
 </section>
 
 <!-- 21. 메서드 보안 -->
@@ -896,7 +896,7 @@ RestClient reportApi(OAuth2AuthorizedClientManager manager) {
     <thead><tr><th style="width:17%">모델</th><th style="width:22%">답하는 질문</th><th style="width:25%">Keycloak 설정</th><th style="width:18%">Spring에서</th><th>쓰는 때</th></tr></thead>
     <tbody>
       <tr><td><strong>Role</strong> (RBAC)</td><td>이 주체가 무슨 역할인가</td><td>Realm/Client role, composite, 그룹 매핑</td><td><code>hasRole</code>, <code>@PreAuthorize</code></td><td class="ok">대부분. 기능 단위 role로</td></tr>
-      <tr><td><strong>Scope</strong></td><td>이 토큰으로 무엇까지 허용했나</td><td>Client scope(<code>report:write</code>), 요청 scope</td><td><code>hasAuthority('SCOPE_…')</code></td><td>에이전트별 권한 축소 → 4회차</td></tr>
+      <tr><td><strong>Scope</strong></td><td>이 토큰으로 무엇까지 허용했나</td><td>Client scope(<code>report:write</code>), 요청 scope</td><td><code>hasAuthority('SCOPE_…')</code></td><td>에이전트별 권한 축소 → A2A 자료</td></tr>
       <tr><td><strong>Authorization Services</strong></td><td>이 리소스에 이 조건으로 되나</td><td>Resource · Scope · Policy · Permission (UMA 2.0)</td><td>Policy Enforcer 또는 직접 질의</td><td>시간·속성·소유 조건이 많을 때만. 복잡도 큼</td></tr>
       <tr><td><strong>데이터 소유 검사</strong></td><td>이 보고서가 kim의 것인가</td><td>(Keycloak 밖)</td><td>서비스 코드에서 직접</td><td class="ok">항상. 역할만으론 못 막는다</td></tr>
     </tbody>

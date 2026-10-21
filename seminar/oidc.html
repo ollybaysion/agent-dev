@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>보충 B · OIDC — 로그인한 사람이 누구인지 알기</title>
+<link rel="stylesheet" href="assets/slides.css">
+</head>
+<body>
+<main class="deck" data-deck="보충 B · OIDC — 로그인한 사람이 누구인지 알기" data-index="index.html">
+
+<!-- 1. 제목 -->
+<section class="slide title">
+  <div class="kicker">에이전트 개발자를 위한 인증·인가 세미나 · 보충 자료 B</div>
+  <h1>OIDC — 로그인한 사람이 누구인지 알기</h1>
+  <p class="sub">OAuth 2.0 위의 신원 계층: ID Token · 표준 claim · Discovery · 로그아웃</p>
+  <p class="meta">대상: 보충 A(OAuth 2.0)를 본 에이전트 개발자 · 약 35분</p>
+</section>
+
+<!-- 2. 위치와 목표 -->
+<section class="slide">
+  <h2>이 자료의 위치 — OAuth 2.0이 답하지 않는 질문 하나</h2>
+  <div class="cols w-3-2 middle">
+    <div>
+      <ul>
+        <li>보충 A의 결론: OAuth 2.0은 "<strong>이 앱이 무엇을 해도 되나</strong>"를 답한다</li>
+        <li>그런데 SSO가 필요한 질문은 "<strong>지금 로그인한 사람이 누구인가</strong>"다</li>
+        <li>OAuth 2.0만으로 그걸 흉내 내면 뚫린다 (4번 슬라이드) — 그래서 2014년에 <strong>OpenID Connect</strong>가 그 위에 얹혔다</li>
+        <li>끝나면: Spring 설정의 <code>openid</code> scope, <code>issuer-uri</code>, <code>OidcUser</code>가 규격의 어느 조각인지 읽힌다</li>
+      </ul>
+      <div class="card note">
+        <h3>한 문장 정의</h3>
+        <p>OIDC = OAuth 2.0 흐름을 그대로 쓰되, 토큰 응답에 <strong>"누가 로그인했는지"를 서명해 담은 ID Token</strong>을 추가하고, 사용자 정보의 이름과 찾는 법을 표준화한 것.</p>
+      </div>
+    </div>
+    <div class="stack">
+      <div class="card">
+        <h3>구성 · 약 35분</h3>
+        <ul class="small">
+          <li>01 왜 OAuth 2.0만으로 안 되나 — 6분</li>
+          <li>02 ID Token — 12분</li>
+          <li>03 scope · claim · UserInfo · Discovery — 10분</li>
+          <li>04 세션과 로그아웃 · Spring · 요약 — 7분</li>
+        </ul>
+      </div>
+      <div class="card"><h3>용어 바꿔 읽기</h3><p class="small">Authorization Server → <strong>OP</strong> (OpenID Provider) · Client → <strong>RP</strong> (Relying Party) · Resource Owner → End-User. 역할은 같고 이름만 바뀐다.</p></div>
+    </div>
+  </div>
+  <aside class="notes">1회차 10번(표준 지도)과 14번(토큰 3종)을 전제로 한다. 이 자료는 ID Token 하나를 끝까지 파고, 그 주변 장치(Discovery, UserInfo, 로그아웃)를 붙인다. Keycloak 콘솔에서 'OpenID Connect'라는 단어가 왜 모든 경로에 들어가는지가 끝나면 설명된다.</aside>
+</section>
+
+<!-- 3. 섹션 01 -->
+<section class="slide section">
+  <div class="num">01</div>
+  <h2>왜 OAuth 2.0만으로 로그인하면 안 되나</h2>
+  <p>열쇠는 신분증이 아니다</p>
+  <aside class="notes">시간 배분: 이 장 6분 (누적 8분).</aside>
+</section>
+
+<!-- 4. 문제 -->
+<section class="slide">
+  <h2>문제 — Access Token은 열쇠지 신분증이 아니다</h2>
+  <p class="lead">2013년까지 흔했던 "OAuth 로그인": access token을 받아 <code>/userinfo</code>를 불러 보고, 돌아온 사람으로 로그인 처리.</p>
+  <figure class="diagram">
+    <svg viewBox="0 0 1136 330" role="img" aria-label="악성 앱 A가 kim의 정상 로그인으로 받은 access token을 우리 앱 B의 로그인 API에 제출하면, B가 userinfo로 확인해 kim으로 로그인시켜 버리는 토큰 바꿔치기 공격 순서">
+      <rect x="40" y="10" width="200" height="44" rx="8" class="svg-bad-box"/>
+      <text x="140" y="38" text-anchor="middle" class="svg-text b bad">악성 앱 A (게임)</text>
+      <rect x="468" y="10" width="200" height="44" rx="8" class="svg-idp"/>
+      <text x="568" y="38" text-anchor="middle" class="svg-text b">IdP (OAuth 2.0만)</text>
+      <rect x="896" y="10" width="200" height="44" rx="8" class="svg-app"/>
+      <text x="996" y="38" text-anchor="middle" class="svg-text b">우리 앱 B (은행)</text>
+
+      <line x1="140" y1="54" x2="140" y2="320" class="svg-lifeline"/>
+      <line x1="568" y1="54" x2="568" y2="320" class="svg-lifeline"/>
+      <line x1="996" y1="54" x2="996" y2="320" class="svg-lifeline"/>
+
+      <path d="M140,90 L560,90" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="350" y="82" text-anchor="middle" class="svg-text small">① kim이 A에 "IdP로 로그인" — 정상 OAuth 흐름, kim이 동의</text>
+
+      <path d="M568,130 L148,130" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="358" y="122" text-anchor="middle" class="svg-text small token">② A에게 access token 발급 — "어느 앱용"인지 표시 없음</text>
+
+      <path d="M140,180 L988,180" class="svg-line bad thick" marker-end="url(#arrow-bad)"/>
+      <text x="564" y="172" text-anchor="middle" class="svg-text small bad">③ A가 그 토큰을 B의 로그인 API에 제출 — "나 kim인데 로그인시켜 줘"</text>
+
+      <path d="M996,225 L576,225" class="svg-line" marker-end="url(#arrow)"/>
+      <text x="786" y="217" text-anchor="middle" class="svg-text small">④ GET /userinfo  Bearer &lt;A의 토큰&gt;</text>
+
+      <path d="M568,260 L988,260" class="svg-line token" marker-end="url(#arrow-token)"/>
+      <text x="778" y="252" text-anchor="middle" class="svg-text small token">⑤ { "sub": "kim", "email": "kim@…" } — 토큰은 진짜니까</text>
+
+      <rect x="700" y="280" width="400" height="36" rx="8" class="svg-bad-box"/>
+      <text x="900" y="303" text-anchor="middle" class="svg-text small b bad">⑥ B: "kim 맞네" → A가 kim으로 로그인 — 뚫림</text>
+    </svg>
+    <figcaption>토큰은 위조되지 않았다. 문제는 "이 토큰이 <strong>B를 위해</strong> 발급됐는가"를 아무도 묻지 않은 것. 게임 앱 하나가 은행 계정을 연다.</figcaption>
+  </figure>
+  <div class="cols c-3 mt">
+    <div class="card bad"><p class="small"><strong>대상(aud)이 없다</strong> — 어느 앱에 준 토큰인지 알 수 없어 바꿔치기가 된다</p></div>
+    <div class="card bad"><p class="small"><strong>"로그인했다"는 사실이 없다</strong> — 언제, 어떻게 인증했는지 토큰에 없다. 만료된 세션의 토큰도 통과</p></div>
+    <div class="card bad"><p class="small"><strong>IdP마다 제각각</strong> — 사용자 정보 주소·필드명이 전부 달라 코드가 IdP에 묶인다</p></div>
+  </div>
+  <aside class="notes">이 공격은 2012년 실제로 여러 소셜 로그인 구현에서 발견됐다(토큰 바꿔치기, token substitution). 핵심 문장: "토큰이 진짜인 것과, 토큰이 나를 위한 것은 다르다." 보충 A의 aud 슬라이드와 연결된다.</aside>
+</section>
+
+<!-- 5. 해결 -->
+<section class="slide">
+  <h2>해결 — OAuth 2.0 위에 "신원 계층"을 얹는다</h2>
+  <div class="cols w-2-3 middle">
+    <div>
+      <ul>
+        <li>흐름은 <strong>그대로</strong> — 같은 302, 같은 code, 같은 토큰 엔드포인트</li>
+        <li>요청에 <code>scope=openid</code>를 넣으면 응답에 <strong>ID Token</strong>이 하나 더 온다</li>
+        <li>ID Token에는 <strong>누가</strong>(sub) · <strong>누구에게</strong>(aud = 내 client_id) · <strong>언제</strong>(auth_time) 로그인했는지가 <strong>서명</strong>돼 있다 → 바꿔치기 불가</li>
+        <li>사용자 정보의 <strong>이름</strong>(claim)과 <strong>찾는 법</strong>(Discovery, UserInfo)이 표준 → IdP를 바꿔도 코드가 안 바뀐다</li>
+        <li>SSO에 꼭 필요한 <strong>로그아웃</strong>도 규격에 들어왔다 (OAuth 2.0엔 없다)</li>
+      </ul>
+      <div class="card note">
+        <p class="small">그래서 "Google로 로그인", "회사 SSO"는 전부 OIDC다. Keycloak 경로에 <code>/protocol/openid-connect/</code>가 들어가는 이유이기도 하다.</p>
+      </div>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 540 330" role="img" aria-label="아래층 OAuth 2.0 위에 OIDC 층이 얹힌 그림. OAuth 2.0 층에는 승인 흐름, access token, scope가 있고 OIDC 층에는 ID Token, 표준 claim, UserInfo, Discovery, 로그아웃이 있다">
+        <rect x="20" y="190" width="500" height="120" rx="12" class="svg-group"/>
+        <text x="40" y="218" class="svg-text b">OAuth 2.0 — 인가 (RFC 6749)</text>
+        <text x="40" y="246" class="svg-text small">· 승인 흐름 (code · client credentials · refresh)</text>
+        <text x="40" y="268" class="svg-text small">· Access Token · scope · aud</text>
+        <text x="40" y="290" class="svg-text small muted">답: 이 앱이 무엇을 해도 되는가</text>
+
+        <rect x="20" y="20" width="500" height="150" rx="12" class="svg-idp"/>
+        <text x="40" y="48" class="svg-text b idp">OIDC — 인증 (OpenID Connect Core 1.0)</text>
+        <rect x="40" y="62" width="150" height="40" rx="8" class="svg-token"/>
+        <text x="115" y="87" text-anchor="middle" class="svg-text small b token">ID Token</text>
+        <rect x="200" y="62" width="150" height="40" rx="8" class="svg-app"/>
+        <text x="275" y="87" text-anchor="middle" class="svg-text small b">표준 scope·claim</text>
+        <rect x="360" y="62" width="140" height="40" rx="8" class="svg-app"/>
+        <text x="430" y="87" text-anchor="middle" class="svg-text small b">UserInfo</text>
+        <rect x="40" y="112" width="150" height="40" rx="8" class="svg-app"/>
+        <text x="115" y="137" text-anchor="middle" class="svg-text small b">Discovery</text>
+        <rect x="200" y="112" width="150" height="40" rx="8" class="svg-app"/>
+        <text x="275" y="137" text-anchor="middle" class="svg-text small b">로그아웃</text>
+        <text x="360" y="138" class="svg-text small muted">답: 누가 로그인했나</text>
+
+        <path d="M270,190 L270,172" class="svg-line" marker-end="url(#arrow)"/>
+        <text x="282" y="184" class="svg-text xs muted">흐름·토큰 엔드포인트를 그대로 사용</text>
+      </svg>
+      <figcaption>OIDC는 OAuth 2.0을 대체하지 않는다. 아래층을 그대로 두고 위층을 올린다.</figcaption>
+    </figure>
+  </div>
+  <aside class="notes">이 그림이 이 자료 전체의 지도다. 이후 슬라이드는 위층의 상자를 하나씩 연다: ID Token(02장), scope·claim·UserInfo·Discovery(03장), 로그아웃(04장).</aside>
+</section>
+
+<!-- 6. 섹션 02 -->
+<section class="slide section">
+  <div class="num">02</div>
+  <h2>ID Token</h2>
+  <p>서명된 "로그인 영수증" — 무엇이 들어 있고, 무엇을 확인해야 하나</p>
+  <aside class="notes">시간 배분: 이 장 12분 (누적 20분). 해부 4분, 검증 4분, Access Token과 비교 2분, sub 2분.</aside>
+</section>
+
+<!-- 7. ID Token 해부 -->
+<section class="slide">
+  <h2>ID Token 해부 — Keycloak이 발급한 실제 payload</h2>
+  <div class="cols w-2-3">
+    <div>
+      <p class="code-title">JWT payload (서명 생략)</p>
+<pre class="small"><code class="lang-json">{
+  "iss": "https://kc.company.com/realms/company",
+  "sub": "f3a1c2d4-7e8b-4a1f-9c2d-0b7e5f6a1234",
+  "aud": "agent-portal",
+  "exp": 1760000300,
+  "iat": 1760000000,
+  "auth_time": 1759999990,
+  "nonce": "n-0S6_WzA2Mj",
+  "azp": "agent-portal",
+  "at_hash": "77QmUPtjPfzWtF2AnpK9RQ",
+  "sid": "0a1b2c3d-…",
+  "typ": "ID",
+  "name": "김철수",
+  "preferred_username": "kim",
+  "email": "kim@company.com",
+  "email_verified": true
+}</code></pre>
+    </div>
+    <table class="compact">
+      <thead><tr><th style="width:30%">claim</th><th>뜻</th></tr></thead>
+      <tbody>
+        <tr><td><code>iss</code> · <code>sub</code></td><td><strong>누가 발급</strong>했고 <strong>누구</strong>인가. 사용자의 전역 ID는 이 둘의 쌍</td></tr>
+        <tr><td><code>aud</code> · <code>azp</code></td><td><strong>누구에게</strong> 준 토큰인가 = 내 client_id. 4번 공격을 막는 칸</td></tr>
+        <tr><td><code>exp</code> · <code>iat</code></td><td>만료 · 발급 시각 (초)</td></tr>
+        <tr><td><code>auth_time</code></td><td>사용자가 <strong>실제로 로그인한</strong> 시각. SSO로 재사용되면 iat보다 훨씬 전</td></tr>
+        <tr><td><code>nonce</code></td><td>로그인 요청 때 앱이 보낸 난수. 재전송 방지</td></tr>
+        <tr><td><code>at_hash</code></td><td>함께 받은 access token의 해시. 토큰 쌍 바꿔치기 방지</td></tr>
+        <tr><td><code>sid</code></td><td>OP의 세션 ID. 로그아웃 때 쓴다</td></tr>
+        <tr><td><code>name</code> <code>email</code> …</td><td>요청한 scope에 따라 붙는 프로필 claim</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small muted mt">위 7줄(<code>iss sub aud exp iat auth_time nonce</code>)이 규격의 뼈대. 나머지는 scope와 OP 설정에 따라 달라진다. <code>typ: "ID"</code>는 Keycloak이 access token과 구분하려고 붙이는 것.</p>
+  <aside class="notes">1회차 15번(JWT 해부)과 같은 형식이지만 이번엔 ID Token이다. aud가 API가 아니라 앱 자신(client_id)이라는 점을 손가락으로 짚는다. auth_time과 iat의 차이로 "SSO 세션 재사용"이 보인다는 것도 짚어 두면 3회차 세션 이야기가 쉬워진다.</aside>
+</section>
+
+<!-- 8. 검증 -->
+<section class="slide">
+  <h2>RP가 ID Token을 받으면 확인하는 7가지 — Spring은 자동, 그래도 알아야 한다</h2>
+  <div class="cols w-3-2">
+    <ol class="steps compact">
+      <li><strong>서명</strong> — <code>iss</code>의 JWKS 공개키로 검증. <code>alg: none</code>은 거부</li>
+      <li><strong>iss</strong> — 설정한 issuer와 <strong>문자열 완전 일치</strong> (https · 포트 · 끝 슬래시까지)</li>
+      <li><strong>aud</strong> — 내 <code>client_id</code>가 들어 있어야 한다. 여러 개면 <code>azp</code>가 내 것이어야 한다</li>
+      <li><strong>exp · iat</strong> — 만료 전인지, 너무 옛날 발급은 아닌지. 시계 오차 ±60초 정도 허용</li>
+      <li><strong>nonce</strong> — 로그인 요청 때 세션에 둔 값과 일치. 캡처한 ID Token 재사용 차단</li>
+      <li><strong>at_hash</strong> — 같이 받은 access token의 해시와 일치 (토큰 응답에 둘이 함께 올 때)</li>
+      <li><strong>auth_time</strong> — <code>max_age</code>로 "N분 내 재인증"을 요구했을 때만 확인</li>
+    </ol>
+    <div class="stack">
+      <div class="card ok">
+        <h3>Spring Security가 하는 것</h3>
+        <p class="small"><code>oauth2Login()</code> 경로에서 <code>OidcIdTokenDecoderFactory</code>가 1·2·4를, <code>OidcIdTokenValidator</code>가 3·5·(6)을 자동으로 한다. 실패하면 로그인 자체가 실패한다 — 사용자 객체가 만들어지지 않는다.</p>
+      </div>
+      <div class="card warn">
+        <h3>직접 짜지 말 것</h3>
+        <p class="small">"JWT 라이브러리로 디코딩해서 email만 꺼내 쓰면 되지"가 4번 공격의 재현이다. aud와 nonce를 빼먹는 순간 OAuth 2.0 시절로 돌아간다.</p>
+      </div>
+      <div class="card">
+        <p class="small"><strong>3번이 핵심.</strong> 다른 앱(A)용 ID Token은 <code>aud</code>가 A의 client_id라서 우리 앱(B)에서 바로 거절된다. 4번 슬라이드의 공격이 여기서 끝난다.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">OpenID Connect Core 3.1.3.7절의 검증 목록을 7개로 추린 것이다. 질문이 많이 나오는 건 nonce: "code 흐름은 이미 state가 있는데 왜 또?" — state는 앱 세션과 콜백을 묶고, nonce는 ID Token 자체에 박혀 토큰 재전송을 막는다. 대상이 다르다.</aside>
+</section>
+
+<!-- 9. ID vs Access -->
+<section class="slide">
+  <h2>ID Token vs Access Token — 둘 다 JWT인데 무엇이 다른가</h2>
+  <table class="compact">
+    <thead><tr><th style="width:18%"></th><th>ID Token</th><th>Access Token</th></tr></thead>
+    <tbody>
+      <tr><td>답하는 질문</td><td><strong>누가</strong> 로그인했나</td><td><strong>무엇에</strong> 접근해도 되나</td></tr>
+      <tr><td>받는 쪽 (<code>aud</code>)</td><td>앱 자신 — <code>aud = client_id</code></td><td>API — <code>aud = bank-api</code></td></tr>
+      <tr><td>읽는 쪽</td><td>앱(RP)이 열어서 읽는다</td><td>앱은 전달만, API가 읽는다</td></tr>
+      <tr><td>형식</td><td><strong>항상 JWT</strong> — 규격이 정함 (OIDC Core)</td><td>자유, opaque 가능 (RFC 6749). Keycloak은 JWT</td></tr>
+      <tr><td>API에 보내나</td><td class="bad">보내지 않는다 — API용 aud가 없다</td><td class="ok"><code>Authorization: Bearer</code>로 보낸다</td></tr>
+      <tr><td>수명과 쓰임</td><td>로그인 처리 한 번. 세션을 만들면 끝 (로그아웃 때 <code>id_token_hint</code>로 한 번 더)</td><td>만료까지 반복 사용, refresh로 갱신</td></tr>
+    </tbody>
+  </table>
+  <div class="cols mt">
+    <div class="card warn">
+      <h3>겉모습이 같아서 생기는 사고</h3>
+      <p class="small">Keycloak은 둘 다 <code>eyJ…</code>로 준다. 구분법은 <code>aud</code>(와 <code>typ</code>). ID Token을 API에 보내면 401, access token에서 email을 꺼내 로그인 처리하면 4번 공격.</p>
+    </div>
+    <div class="card note">
+      <h3>한 줄 기억법</h3>
+      <p>ID Token은 <strong>앱이 읽고 버리는 신분증</strong>, Access Token은 <strong>API에 내미는 열쇠</strong>.</p>
+    </div>
+  </div>
+  <aside class="notes">1회차 14번 표를 ID/Access 둘로 좁혀 깊게 본 것. "그럼 refresh token은?"이 나오면 OIDC와 무관한 OAuth 2.0 장치라고 답하고 보충 A로 돌린다.</aside>
+</section>
+
+<!-- 10. sub -->
+<section class="slide">
+  <h2>sub — 사용자를 식별하는 열쇠는 이메일이 아니다</h2>
+  <div class="cols">
+    <div class="stack">
+      <div class="card bad">
+        <h3>❌ 이메일을 사용자 PK로</h3>
+        <ul>
+          <li>이메일은 <strong>바뀐다</strong> (결혼, 부서 이동, 도메인 변경)</li>
+          <li>퇴사자 주소가 <strong>재할당</strong>되면 새 사람이 옛 계정을 연다</li>
+          <li><code>email_verified: false</code>면 본인 소유인지도 모른다 — 일부 IdP는 미검증 이메일을 그대로 준다</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3>✅ (iss, sub) 쌍을 PK로</h3>
+        <ul>
+          <li><code>sub</code>는 OP가 보장하는 <strong>불변 · 재사용 없는</strong> 식별자. Keycloak은 사용자 UUID</li>
+          <li>단, <strong>그 issuer 안에서만</strong> 고유. IdP가 둘이면 iss까지 함께 저장</li>
+          <li>이메일·이름은 <strong>표시용 속성</strong>으로 따로 저장하고 로그인 때마다 갱신</li>
+        </ul>
+      </div>
+    </div>
+    <div>
+      <p class="code-title">UserService.java — 로그인 후 내부 사용자와 연결</p>
+<pre class="small"><code class="lang-java">public AppUser onLogin(OidcUser oidc) {
+    String iss = oidc.getIssuer().toString();
+    String sub = oidc.getSubject();   // ← 열쇠
+    String name = oidc.getFullName();
+    String email = oidc.getEmail();
+
+    return users.findByIssuerAndSubject(iss, sub)
+        .map(u -&gt; u.refreshProfile(name, email))
+        .orElseGet(() -&gt; users.save(
+            AppUser.create(iss, sub, name, email)));
+}</code></pre>
+      <div class="card note mt">
+        <h3>Pairwise sub</h3>
+        <p class="small">OP가 <strong>앱마다 다른 sub</strong>를 주는 옵션. 두 앱이 사용자 DB를 맞춰 봐도 같은 사람인지 모르게 한다. Keycloak은 Pairwise subject identifier mapper. 사내 SSO에선 보통 쓰지 않지만, 외부 파트너에 열 때 고려.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">기존 시스템이 이메일을 PK로 쓰고 있으면 마이그레이션이 필요하다. 현실적인 중간 단계: 첫 OIDC 로그인 때 이메일로 기존 계정을 찾아 (iss, sub)를 붙여 두고, 이후부터는 sub로만 찾는다. 이 코드가 그 패턴이다.</aside>
+</section>
+
+<!-- 11. 섹션 03 -->
+<section class="slide section">
+  <div class="num">03</div>
+  <h2>scope · claim · UserInfo · Discovery</h2>
+  <p>사용자 정보의 이름과 찾는 법을 표준화한 장치들</p>
+  <aside class="notes">시간 배분: 이 장 10분 (누적 30분). scope→claim 3분, UserInfo 2분, Discovery 3분, response_type·nonce 2분.</aside>
+</section>
+
+<!-- 12. scope → claim -->
+<section class="slide">
+  <h2>표준 scope → 표준 claim — 어느 OP에서나 같은 이름</h2>
+  <div class="cols w-3-2">
+    <table class="compact">
+      <thead><tr><th style="width:22%">scope</th><th>받게 되는 claim</th></tr></thead>
+      <tbody>
+        <tr><td><code>openid</code></td><td><strong>필수.</strong> 이게 있어야 OIDC — ID Token이 발급되고 <code>sub</code>가 온다. 없으면 순수 OAuth 2.0</td></tr>
+        <tr><td><code>profile</code></td><td><code>name</code> <code>family_name</code> <code>given_name</code> <code>preferred_username</code> <code>picture</code> <code>locale</code> <code>updated_at</code> …</td></tr>
+        <tr><td><code>email</code></td><td><code>email</code> <code>email_verified</code></td></tr>
+        <tr><td><code>address</code></td><td><code>address</code> (구조화된 JSON)</td></tr>
+        <tr><td><code>phone</code></td><td><code>phone_number</code> <code>phone_number_verified</code></td></tr>
+        <tr><td><code>offline_access</code></td><td>claim 없음 — 사용자가 없을 때도 쓸 수 있는 <strong>장기 refresh token</strong> 요청</td></tr>
+      </tbody>
+    </table>
+    <div class="stack">
+      <div class="card note">
+        <h3>Spring 설정의 그 줄</h3>
+<pre class="small"><code class="lang-yaml">scope: openid, profile, email</code></pre>
+        <p class="small"><code>openid</code>가 스위치, 나머지는 "이름과 이메일도 달라". Spring은 <code>openid</code>가 있으면 OIDC 경로(<code>OidcUser</code>)로, 없으면 OAuth2 경로(<code>OAuth2User</code>)로 분기한다.</p>
+      </div>
+      <div class="card">
+        <h3>Keycloak에서는</h3>
+        <p class="small">이 표가 <strong>Client Scopes</strong>와 그 안의 <strong>Mapper</strong>로 구현돼 있다. <code>roles</code> 같은 회사 고유 claim은 OIDC 표준 밖 — 2회차에서 직접 만든다.</p>
+      </div>
+      <div class="card warn">
+        <p class="small">claim이 <strong>ID Token에 올지 UserInfo에 올지</strong>는 OP 설정에 따른다. Keycloak은 기본 둘 다. 그래서 "ID Token에 email이 없다"는 질문은 대개 Mapper의 'Add to ID token' 체크 문제.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">보충 A의 scope(동작 범위)와 이 slide의 scope(정보 범위)가 같은 파라미터라는 점을 짚는다. OIDC는 OAuth 2.0의 scope 칸을 빌려 "어떤 정보를 달라"는 뜻으로 쓴다. 한 요청에 둘을 섞어 보낼 수 있다: scope=openid email accounts:read.</aside>
+</section>
+
+<!-- 13. UserInfo -->
+<section class="slide">
+  <h2>UserInfo 엔드포인트 — ID Token에 다 못 담은 정보를 가져오는 곳</h2>
+  <div class="cols">
+    <div>
+      <p class="code-title">access token으로 부른다 (ID Token이 아니다)</p>
+<pre class="small"><code class="lang-http">GET /realms/company/protocol/openid-connect/userinfo
+Authorization: Bearer eyJhbGciOiJSUzI1NiIs…   # access token
+
+HTTP/1.1 200 OK
+Content-Type: application/json
+{
+  "sub": "f3a1c2d4-7e8b-4a1f-9c2d-0b7e5f6a1234",
+  "name": "김철수",
+  "preferred_username": "kim",
+  "email": "kim@company.com",
+  "email_verified": true
+}</code></pre>
+      <div class="card warn mt">
+        <p class="small"><strong>규칙 하나:</strong> 응답의 <code>sub</code>가 ID Token의 <code>sub</code>와 다르면 버린다. 토큰 바꿔치기의 마지막 방어선. Spring이 확인한다.</p>
+      </div>
+    </div>
+    <div class="stack">
+      <div class="card note">
+        <h3>언제 쓰나</h3>
+        <ul>
+          <li>ID Token을 <strong>작게</strong> 유지하고 싶을 때 — 프로필 사진 URL, 주소 같은 큰 값</li>
+          <li>OP가 특정 claim을 ID Token에 안 넣도록 설정돼 있을 때</li>
+          <li>로그인 <strong>이후</strong> 바뀐 정보를 다시 읽을 때 (ID Token은 발급 시점 스냅샷)</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3>Spring은 자동으로 부른다</h3>
+        <p class="small"><code>OidcUserService</code>가 로그인 직후 1회 호출 — 조건: Discovery에 <code>userinfo_endpoint</code>가 있고, access token의 scope에 <code>profile</code> <code>email</code> <code>address</code> <code>phone</code> 중 하나라도 있을 때. 결과는 ID Token claim과 합쳐져 <code>OidcUser.getClaims()</code>에 들어간다.</p>
+      </div>
+      <div class="card">
+        <p class="small">매 요청마다 부르는 곳이 아니다. 로그인 때 한 번 읽어 세션에 둔다. 사용자 정보가 매 요청 필요하면 그건 세션의 일이다.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">"ID Token이 있는데 UserInfo는 왜 있냐"는 질문의 답은 '크기와 시점'이다. 그리고 4번 공격을 다시 상기: UserInfo만으로 로그인 판단을 하면 안 되는 이유는 UserInfo가 aud를 확인하지 않기 때문이다. ID Token 검증을 통과한 뒤의 보조 수단일 뿐이다.</aside>
+</section>
+
+<!-- 14. Discovery -->
+<section class="slide">
+  <h2>Discovery — issuer 주소 하나로 나머지를 전부 알아낸다</h2>
+  <div class="cols w-3-2">
+    <div>
+      <p class="code-title">GET {issuer}/.well-known/openid-configuration</p>
+<pre class="small"><code class="lang-json">{
+  "issuer": "https://kc.company.com/realms/company",
+  "authorization_endpoint": "{issuer}/protocol/openid-connect/auth",
+  "token_endpoint": "{issuer}/protocol/openid-connect/token",
+  "userinfo_endpoint": "{issuer}/protocol/openid-connect/userinfo",
+  "end_session_endpoint": "{issuer}/protocol/openid-connect/logout",
+  "jwks_uri": "{issuer}/protocol/openid-connect/certs",
+  "scopes_supported": ["openid", "profile", "email", "roles", …],
+  "response_types_supported": ["code", "id_token", …],
+  "code_challenge_methods_supported": ["plain", "S256"],
+  "backchannel_logout_supported": true
+}</code></pre>
+      <p class="small muted">실제 문서에는 <code>{issuer}</code> 자리에 전체 URL이 반복된다. 줄여 적은 것.</p>
+    </div>
+    <div class="stack">
+      <div class="card note">
+        <h3>Spring의 issuer-uri 한 줄이 하는 일</h3>
+        <p class="small">기동 시 이 문서를 <strong>1회</strong> 받아 authorize · token · userinfo · logout 주소와 <code>jwks_uri</code>를 채운다. 공개키는 <strong>캐시</strong>하고 모르는 <code>kid</code>가 오면 다시 받는다 — 키 회전이 무중단인 이유. 이 문서가 없는 순수 OAuth 2.0 서버(GitHub 등)는 주소를 손으로 적는다.</p>
+      </div>
+      <div class="card warn">
+        <h3>두 가지 함정</h3>
+        <ul class="small">
+          <li>기동 때 OP가 응답하지 않으면 <strong>앱이 뜨지 않는다</strong></li>
+          <li><code>issuer</code>는 토큰의 <code>iss</code>와 <strong>글자 단위로 같아야</strong> 한다. 프록시 뒤 Keycloak은 <code>KC_HOSTNAME</code>을 안 맞추면 <code>http://localhost:8080</code>으로 발급해 전부 실패</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">1회차 16번(Discovery와 JWKS)을 RP 관점에서 다시 본다. Keycloak 실습(2회차)에서 가장 많이 겪는 장애가 iss 불일치다. 이 슬라이드의 warn 카드를 2회차 트러블슈팅에서 다시 보여준다.</aside>
+</section>
+
+<!-- 15. response_type과 nonce -->
+<section class="slide">
+  <h2>흐름 선택 — response_type은 code 하나만 기억하면 된다</h2>
+  <table class="compact">
+    <thead><tr><th style="width:24%"><code>response_type</code></th><th style="width:16%">이름</th><th>토큰이 오는 길</th><th style="width:20%">판정</th></tr></thead>
+    <tbody>
+      <tr><td><code>code</code></td><td>Authorization Code</td><td>code만 프런트 채널 → ID·access 토큰은 <strong>백 채널</strong></td><td class="ok">이것만 쓴다</td></tr>
+      <tr><td><code>id_token</code> · <code>id_token token</code></td><td>Implicit</td><td>ID Token(과 access)이 URL fragment로 브라우저에 직접</td><td class="bad">폐기 (보충 A)</td></tr>
+      <tr><td><code>code id_token</code> …</td><td>Hybrid</td><td>ID Token은 즉시, access는 code로</td><td class="bad">특수 용도. 쓰지 않는다</td></tr>
+    </tbody>
+  </table>
+  <div class="cols mt">
+    <div class="card note">
+      <h3>그런데 왜 code 흐름에도 nonce가 있나</h3>
+      <p class="small">nonce는 원래 Implicit에서 fragment로 날아오는 ID Token의 재전송을 막으려고 생겼다. code 흐름에선 토큰이 백 채널로 오지만, Spring과 OP는 <strong>그래도 넣는다</strong> — 비용이 0이고, ID Token 자체에 박히는 유일한 요청-응답 묶음이기 때문. <code>state</code>는 세션과 콜백을, <code>nonce</code>는 세션과 ID Token을 묶는다.</p>
+    </div>
+    <div class="card">
+      <h3>로그인 요청에 더 붙일 수 있는 것 (OIDC 추가 파라미터)</h3>
+      <ul class="small">
+        <li><code>prompt=login</code> — SSO 세션이 있어도 다시 로그인 화면 (민감 작업 전)</li>
+        <li><code>prompt=none</code> — 화면 없이 세션 확인만. 없으면 <code>login_required</code> 오류</li>
+        <li><code>max_age=300</code> — 5분 내 인증이 아니면 재인증. <code>auth_time</code>으로 확인</li>
+        <li><code>login_hint=kim@company.com</code> — 아이디 칸 미리 채우기</li>
+        <li><code>ui_locales=ko</code> — 로그인 화면 언어</li>
+      </ul>
+    </div>
+  </div>
+  <aside class="notes">Spring에서 prompt나 max_age를 붙이려면 OAuth2AuthorizationRequestResolver를 커스터마이즈한다. A2A 자료의 '사람 승인 게이트'에서 prompt=login과 max_age를 실제로 쓴다.</aside>
+</section>
+
+<!-- 16. 섹션 04 -->
+<section class="slide section">
+  <div class="num">04</div>
+  <h2>세션과 로그아웃</h2>
+  <p>로그인은 한 곳, 세션은 두 개 — 로그아웃도 두 번</p>
+  <aside class="notes">시간 배분: 이 장 7분 (누적 37분, 요약 포함). 로그아웃 3분, Spring 매핑 2분, 실수·요약 2분.</aside>
+</section>
+
+<!-- 17. 로그아웃 -->
+<section class="slide">
+  <h2>로그아웃 — RP-Initiated Logout과 세션 두 개</h2>
+  <div class="cols">
+    <div>
+      <ol class="steps compact">
+        <li>브라우저 → 앱 <strong>POST /logout</strong> (CSRF 토큰 포함, fetch 금지)</li>
+        <li>앱이 <strong>자기 세션</strong>을 지우고 302 → OP <code>end_session_endpoint</code> <span class="small muted">+ <code>id_token_hint</code> · <code>post_logout_redirect_uri</code></span></li>
+        <li>OP가 <strong>SSO 세션</strong>을 지운다 — <code>id_token_hint</code>로 누구인지 확인</li>
+        <li>OP가 302 → <code>post_logout_redirect_uri</code>. 등록된 주소만</li>
+      </ol>
+      <div class="card warn mt">
+        <h3>앱 세션만 지우면</h3>
+        <p class="small">다음 클릭에 302 → OP → SSO 세션이 살아 있어 <strong>화면 없이 자동 재로그인</strong>. "로그아웃이 안 된다"는 증상.</p>
+      </div>
+      <div class="card note">
+        <h3>Back-Channel Logout (반대 방향)</h3>
+        <p class="small">OP 쪽에서 세션이 끊기면 OP가 <strong>각 앱에 직접</strong> <code>logout_token</code>(<code>sid</code> 포함)을 POST, 앱이 그 세션을 지운다. Spring 6.2+ <code>oidcLogout()</code>.</p>
+      </div>
+    </div>
+    <div>
+      <p class="code-title">SecurityConfig.java</p>
+<pre class="small"><code class="lang-java">@Bean
+SecurityFilterChain filterChain(HttpSecurity http,
+        ClientRegistrationRepository clients)
+        throws Exception {
+    http
+        .oauth2Login(Customizer.withDefaults())
+        .logout(l -&gt; l.logoutSuccessHandler(
+            oidcLogout(clients)));          // ← 2·3·4
+    return http.build();
+}
+
+LogoutSuccessHandler oidcLogout(
+        ClientRegistrationRepository clients) {
+    var h = new OidcClientInitiatedLogoutSuccessHandler(
+        clients);
+    // Keycloak Client에 등록된 주소여야 한다
+    h.setPostLogoutRedirectUri("{baseUrl}/");
+    return h;
+}</code></pre>
+      <p class="small muted mt">Keycloak Client의 <strong>Valid post logout redirect URIs</strong>에 실제 주소를 넣지 않으면 "Invalid redirect uri".</p>
+    </div>
+  </div>
+  <aside class="notes">3회차 BFF 로그아웃 슬라이드와 같은 흐름을 규격 이름으로 부른 것. OAuth 2.0에는 로그아웃 규격이 없다는 사실을 강조 — 이것도 OIDC가 얹은 것이다.</aside>
+</section>
+
+<!-- 18. Spring 매핑 -->
+<section class="slide">
+  <h2>Spring Security에 대응시키기 — 규격 용어 → 클래스</h2>
+  <div class="cols w-3-2">
+    <table class="compact">
+      <thead><tr><th style="width:34%">OIDC</th><th>Spring Security 6</th></tr></thead>
+      <tbody>
+        <tr><td>RP (Relying Party)</td><td><code>oauth2Login()</code> + scope에 <code>openid</code></td></tr>
+        <tr><td>OP (OpenID Provider)</td><td><code>provider.{id}.issuer-uri</code> → Discovery로 나머지 자동</td></tr>
+        <tr><td>ID Token 검증</td><td><code>OidcIdTokenDecoderFactory</code> + <code>OidcIdTokenValidator</code> (자동)</td></tr>
+        <tr><td>로그인한 사용자</td><td><code>OidcUser</code> — <code>getIdToken()</code> <code>getUserInfo()</code> <code>getClaims()</code> <code>getSubject()</code></td></tr>
+        <tr><td>UserInfo</td><td><code>OidcUserService</code> — profile·email 등 scope가 있으면 자동 호출</td></tr>
+        <tr><td>RP-Initiated Logout</td><td><code>OidcClientInitiatedLogoutSuccessHandler</code></td></tr>
+        <tr><td>Back-Channel Logout</td><td><code>oidcLogout(l -&gt; l.backChannel(...))</code> (6.2+)</td></tr>
+        <tr><td><code>openid</code>가 없을 때</td><td><code>OAuth2User</code> — <code>user-info-uri</code> · <code>user-name-attribute</code>를 손으로 설정</td></tr>
+      </tbody>
+    </table>
+    <div>
+      <p class="code-title">MeController.java</p>
+<pre class="small"><code class="lang-java">@GetMapping("/api/me")
+Map&lt;String, Object&gt; me(
+    @AuthenticationPrincipal OidcUser user) {
+    var id = user.getIdToken();
+    return Map.of(
+        "sub",      user.getSubject(),
+        "name",     user.getFullName(),
+        "email",    user.getEmail(),
+        "authTime", id.getAuthenticatedAt(),
+        "claims",   user.getClaims());
+}
+// claims = ID Token + UserInfo 합본</code></pre>
+      <div class="card note mt">
+        <p class="small"><code>OidcUser</code>는 <code>OAuth2User</code>를 상속한다. 컨트롤러에 <code>OAuth2User</code>로 받아도 동작하지만 <code>getIdToken()</code>이 없다. OIDC로 로그인했으면 <code>OidcUser</code>로 받는다.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">1회차 20번(로그인 후 사용자 정보)의 코드가 왜 OidcUser인지가 여기서 설명된다. GitHub 로그인처럼 openid가 없는 OP를 붙일 때만 마지막 줄의 OAuth2User 경로를 쓴다.</aside>
+</section>
+
+<!-- 19. 자주 하는 실수 -->
+<section class="slide">
+  <h2>자주 하는 실수</h2>
+  <div class="cols c-3">
+    <div class="card bad"><h3>❌ access token으로 로그인 판단</h3><p>UserInfo가 kim을 돌려줬다고 kim으로 로그인시킨다. 4번 슬라이드의 공격. 로그인 판단은 <strong>aud가 검증된 ID Token</strong>으로만.</p></div>
+    <div class="card bad"><h3>❌ ID Token을 API에</h3><p>aud가 client_id라 API에서 401. 거꾸로 API가 ID Token을 받아 주도록 고치면 더 나쁘다 — 로그인 영수증이 열쇠가 된다.</p></div>
+    <div class="card bad"><h3>❌ 이메일을 사용자 PK로</h3><p>바뀌고, 재할당되고, 미검증일 수 있다. <code>(iss, sub)</code>로 찾고 이메일은 속성으로.</p></div>
+  </div>
+  <div class="cols c-3 mt">
+    <div class="card bad"><h3>❌ JWT 라이브러리로 직접 검증</h3><p>서명만 보고 aud · nonce · iss를 빼먹는다. <code>oauth2Login()</code>이 하는 7가지를 손으로 다시 짜지 말 것.</p></div>
+    <div class="card bad"><h3>❌ iss 불일치를 설정으로 덮기</h3><p>프록시 뒤 Keycloak이 <code>http://localhost</code>로 발급하는데 검증을 끈다. 고칠 곳은 <code>KC_HOSTNAME</code>이다.</p></div>
+    <div class="card bad"><h3>❌ 앱 세션만 로그아웃</h3><p>다음 클릭에 자동 재로그인. <code>end_session_endpoint</code>로 보내고, post logout URI를 Keycloak에 등록.</p></div>
+  </div>
+  <aside class="notes">1회차·보충 A의 실수와 겹치지 않는 '신원' 쪽 실수만 모았다. 첫 번째와 네 번째가 같은 뿌리(검증 생략)다.</aside>
+</section>
+
+<!-- 20. 요약 -->
+<section class="slide">
+  <h2>요약 · 본편으로</h2>
+  <div class="cols w-3-2">
+    <ul class="checklist">
+      <li>Access Token은 열쇠, ID Token은 신분증 — 열쇠로 <strong>신원을 판단하면 바꿔치기</strong>에 뚫린다</li>
+      <li>OIDC = OAuth 2.0 흐름 + <code>scope=openid</code> + <strong>서명된 ID Token</strong> + 표준 claim + Discovery + 로그아웃</li>
+      <li>ID Token의 <strong>aud = 내 client_id</strong>, nonce, iss, exp, 서명 — Spring이 7가지를 자동 검증</li>
+      <li>사용자의 열쇠는 <strong>(iss, sub)</strong>. 이메일은 속성</li>
+      <li><code>profile</code> <code>email</code>은 claim 묶음 이름. 큰 값은 UserInfo로</li>
+      <li>issuer 주소 하나 → Discovery → 나머지 자동. <strong>iss는 글자 단위 일치</strong></li>
+      <li>세션은 둘 — 로그아웃은 <code>end_session_endpoint</code>까지</li>
+    </ul>
+    <div class="stack">
+      <div class="card note big">
+        <h3>본편에서 이어지는 곳</h3>
+        <p><strong>2회차</strong> Keycloak의 Client Scopes · Mapper가 이 자료의 claim 표를 구현한다. <strong>3회차</strong> ID Token으로 만든 세션을 BFF가 들고, access token만 API로. <strong>별도 A2A</strong> 에이전트가 "kim 대신" 일할 때 ID Token의 sub를 어떻게 끝까지 가져가나.</p>
+      </div>
+      <div class="card">
+        <h3>표준 문서</h3>
+        <p class="small">OpenID Connect Core 1.0 · Discovery 1.0 · RP-Initiated Logout 1.0 · Back-Channel Logout 1.0</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+<script src="assets/slides.js"></script>
+</body>
+</html>

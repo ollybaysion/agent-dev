@@ -19,10 +19,11 @@
 
 <!-- 2. 시리즈 지도 -->
 <section class="slide">
-  <h2>시리즈 지도 — 4회차의 흐름</h2>
+  <h2>시리즈 지도 — 3회차의 흐름, 그리고 별도 자료</h2>
   <figure class="diagram">
-    <svg viewBox="0 0 1136 160" role="img" aria-label="네 회차의 흐름: SSO에서 로그인을 한 곳에 모으고, Keycloak으로 그 한 곳을 운영하고, BFF로 토큰을 서버에 두고, A2A로 에이전트 간 위임을 다룬다">
+    <svg viewBox="0 0 1136 160" role="img" aria-label="세 회차의 흐름: SSO에서 로그인을 한 곳에 모으고, Keycloak으로 그 한 곳을 운영하고, BFF로 토큰을 서버에 둔다. 에이전트 간 위임을 다루는 A2A는 흐름 밖의 별도 자료다">
       <text x="125" y="20" text-anchor="middle" class="svg-num">▼ 오늘</text>
+      <text x="1010" y="20" text-anchor="middle" class="svg-text small muted">별도 자료 (1~3회차 전제)</text>
       <rect x="0" y="30" width="250" height="100" rx="12" class="svg-app" style="stroke-width:3;stroke:var(--accent)"/>
       <text x="125" y="62" text-anchor="middle" class="svg-text b lg">1 · SSO</text>
       <text x="125" y="88" text-anchor="middle" class="svg-text small muted">로그인을 한 곳에 맡긴다</text>
@@ -38,16 +39,16 @@
       <text x="715" y="88" text-anchor="middle" class="svg-text small muted">토큰을 브라우저에 두지 않는다</text>
       <text x="715" y="108" text-anchor="middle" class="svg-text small muted">쿠키 · 302/401 · CSRF</text>
 
-      <rect x="885" y="30" width="250" height="100" rx="12" class="svg-agent"/>
-      <text x="1010" y="62" text-anchor="middle" class="svg-text b lg">4 · A2A</text>
+      <line x1="862" y1="30" x2="862" y2="130" class="svg-line muted dashed"/>
+      <rect x="885" y="30" width="250" height="100" rx="12" class="svg-agent" style="stroke-dasharray:6 5"/>
+      <text x="1010" y="62" text-anchor="middle" class="svg-text b lg">A2A</text>
       <text x="1010" y="88" text-anchor="middle" class="svg-text small muted">에이전트가 누구로 부르는가</text>
-      <text x="1010" y="108" text-anchor="middle" class="svg-text small muted">Token Exchange · act · MCP · A2A</text>
+      <text x="1010" y="108" text-anchor="middle" class="svg-text small muted">Token Exchange · act · MCP</text>
 
       <path d="M250,80 L292,80" class="svg-line" marker-end="url(#arrow)"/>
       <path d="M545,80 L587,80" class="svg-line" marker-end="url(#arrow)"/>
-      <path d="M840,80 L882,80" class="svg-line" marker-end="url(#arrow)"/>
     </svg>
-    <figcaption>앞 회차의 결론이 다음 회차의 전제가 된다.</figcaption>
+    <figcaption>앞 회차의 결론이 다음 회차의 전제가 된다. A2A는 이 흐름을 전제로 하되, 흐름 밖에서 따로 다루는 자료다.</figcaption>
   </figure>
   <div class="cols mt">
     <div class="card note">
@@ -59,7 +60,7 @@
       <p>암호학 이론, Keycloak 운영(HA·백업), LDAP/AD 연동 세부, 모바일 앱 인증.</p>
     </div>
   </div>
-  <aside class="notes">네 회차는 독립 강의가 아니라 한 줄기다. 1회차에서 "토큰을 받는 법"을, 2회차에서 "토큰에 무엇이 들어가고 어떻게 검증하는지"를, 3회차에서 "브라우저가 있을 때 토큰을 어디 둘지"를, 4회차에서 "에이전트가 남을 대신해 부를 때"를 다룬다.</aside>
+  <aside class="notes">세 회차는 독립 강의가 아니라 한 줄기다. 1회차에서 "토큰을 받는 법"을, 2회차에서 "토큰에 무엇이 들어가고 어떻게 검증하는지"를, 3회차에서 "브라우저가 있을 때 토큰을 어디 둘지"를 다룬다. "에이전트가 남을 대신해 부를 때"는 이 흐름을 전제로 하는 별도 자료 A2A에서 따로 다룬다.</aside>
 </section>
 
 <!-- 3. 오늘의 목표 -->
@@ -175,7 +176,7 @@
       <tr><td>순서</td><td>먼저</td><td>인증이 끝난 뒤</td></tr>
       <tr><td>실패 응답</td><td><code>401 Unauthorized</code> — 이름과 달리 "인증 안 됨"</td><td><code>403 Forbidden</code> — 누군지는 알지만 권한 없음</td></tr>
       <tr><td>비유</td><td>사원증 발급 (신분 확인)</td><td>문마다 다른 출입 권한</td></tr>
-      <tr><td>이 시리즈</td><td>1·3회차 (SSO, BFF)</td><td>2·4회차 (Role, scope, 위임)</td></tr>
+      <tr><td>이 시리즈</td><td>1·3회차 (SSO, BFF)</td><td>2회차 + 별도 A2A (Role, scope, 위임)</td></tr>
       <tr><td>Spring</td><td><code>oauth2Login()</code>, <code>oauth2ResourceServer()</code></td><td><code>authorizeHttpRequests()</code>, <code>@PreAuthorize</code></td></tr>
     </tbody>
   </table>
@@ -249,7 +250,7 @@
       <figcaption>앱이 늘어도 로그인 구현은 늘지 않는다. 앱은 "토큰 검증"만 추가하면 된다.</figcaption>
     </figure>
   </div>
-  <aside class="notes">여기서 "앱이 비밀번호를 보지 않는다"를 강조한다. 이게 SSO의 보안상 핵심이다. 에이전트도 IdP가 발급한 토큰을 받는 '앱'의 하나라는 점을 미리 짚어 두면 4회차가 자연스럽다.</aside>
+  <aside class="notes">여기서 "앱이 비밀번호를 보지 않는다"를 강조한다. 이게 SSO의 보안상 핵심이다. 에이전트도 IdP가 발급한 토큰을 받는 '앱'의 하나라는 점을 미리 짚어 두면 별도 자료 A2A가 자연스럽다.</aside>
 </section>
 
 <!-- 8. 한 번 로그인이 되는 원리 -->

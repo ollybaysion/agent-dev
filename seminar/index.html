@@ -45,41 +45,50 @@
 <div class="wrap">
   <div class="top">
     <header class="hero">
-      <div class="kicker">세미나 시리즈 · 4회</div>
+      <div class="kicker">세미나 시리즈 · 들어가며 + 3회 + 보충 2편 + 별도 1편</div>
       <h1>에이전트 개발자를 위한 인증·인가</h1>
-      <p>SSO → Keycloak → BFF → A2A. Java/Spring 경험은 있지만 SSO·IdP·OAuth를 처음 다루는 에이전트 개발 실무자를 위한 시리즈입니다. 매 회차는 <strong>왜 필요한가 → 개념(그림) → Spring 코드 → 자주 하는 실수 → 다음 회차</strong> 순서로 진행합니다.</p>
+      <p>SSO → Keycloak → BFF. Java/Spring 경험은 있지만 SSO·IdP·OAuth를 처음 다루는 에이전트 개발 실무자를 위한 시리즈입니다. 매 회차는 <strong>왜 필요한가 → 개념(그림) → Spring 코드 → 자주 하는 실수 → 다음 회차</strong> 순서로 진행합니다.</p>
     </header>
     <button type="button" onclick="SeminarSlides.toggleTheme()">테마 전환</button>
   </div>
 
   <figure class="flow">
-    <svg viewBox="0 0 1040 150" role="img" aria-label="네 회차의 흐름: SSO에서 로그인을 한 곳에 모으고, Keycloak으로 그 한 곳을 운영하고, BFF로 토큰을 서버에 두고, A2A로 에이전트 간 위임을 다룬다">
-      <rect x="10" y="30" width="235" height="90" rx="12" class="svg-app"/>
-      <text x="127" y="60" text-anchor="middle" class="svg-text b lg">1 · SSO</text>
-      <text x="127" y="84" text-anchor="middle" class="svg-text small muted">로그인을 한 곳에 맡긴다</text>
-      <text x="127" y="104" text-anchor="middle" class="svg-text xs muted">OIDC · JWT · code flow</text>
+    <svg viewBox="0 0 1040 150" role="img" aria-label="세 회차의 흐름: SSO에서 로그인을 한 곳에 모으고, Keycloak으로 그 한 곳을 운영하고, BFF로 토큰을 서버에 둔다">
+      <rect x="10" y="30" width="300" height="90" rx="12" class="svg-app"/>
+      <text x="160" y="60" text-anchor="middle" class="svg-text b lg">1 · SSO</text>
+      <text x="160" y="84" text-anchor="middle" class="svg-text small muted">로그인을 한 곳에 맡긴다</text>
+      <text x="160" y="104" text-anchor="middle" class="svg-text xs muted">OIDC · JWT · code flow</text>
 
-      <rect x="275" y="30" width="235" height="90" rx="12" class="svg-idp"/>
-      <text x="392" y="60" text-anchor="middle" class="svg-text b lg">2 · Keycloak</text>
-      <text x="392" y="84" text-anchor="middle" class="svg-text small muted">그 "한 곳"을 직접 운영한다</text>
-      <text x="392" y="104" text-anchor="middle" class="svg-text xs muted">Realm · Client · Role · 검증</text>
+      <rect x="370" y="30" width="300" height="90" rx="12" class="svg-idp"/>
+      <text x="520" y="60" text-anchor="middle" class="svg-text b lg">2 · Keycloak</text>
+      <text x="520" y="84" text-anchor="middle" class="svg-text small muted">그 "한 곳"을 직접 운영한다</text>
+      <text x="520" y="104" text-anchor="middle" class="svg-text xs muted">Realm · Client · Role · 검증</text>
 
-      <rect x="540" y="30" width="235" height="90" rx="12" class="svg-token"/>
-      <text x="657" y="60" text-anchor="middle" class="svg-text b lg">3 · BFF</text>
-      <text x="657" y="84" text-anchor="middle" class="svg-text small muted">토큰은 서버가 보관한다</text>
-      <text x="657" y="104" text-anchor="middle" class="svg-text xs muted">쿠키 · 302/401 · CSRF</text>
+      <rect x="730" y="30" width="300" height="90" rx="12" class="svg-token"/>
+      <text x="880" y="60" text-anchor="middle" class="svg-text b lg">3 · BFF</text>
+      <text x="880" y="84" text-anchor="middle" class="svg-text small muted">토큰은 서버가 보관한다</text>
+      <text x="880" y="104" text-anchor="middle" class="svg-text xs muted">쿠키 · 302/401 · CSRF</text>
 
-      <rect x="805" y="30" width="235" height="90" rx="12" class="svg-agent"/>
-      <text x="922" y="60" text-anchor="middle" class="svg-text b lg">4 · A2A</text>
-      <text x="922" y="84" text-anchor="middle" class="svg-text small muted">에이전트는 누구로 부르는가</text>
-      <text x="922" y="104" text-anchor="middle" class="svg-text xs muted">위임 · Token Exchange · MCP</text>
-
-      <path d="M245,75 L272,75" class="svg-line" marker-end="url(#arrow)"/>
-      <path d="M510,75 L537,75" class="svg-line" marker-end="url(#arrow)"/>
-      <path d="M775,75 L802,75" class="svg-line" marker-end="url(#arrow)"/>
+      <path d="M310,75 L367,75" class="svg-line" marker-end="url(#arrow)"/>
+      <path d="M670,75 L727,75" class="svg-line" marker-end="url(#arrow)"/>
     </svg>
-    <figcaption>앞 회차의 결론이 다음 회차의 전제가 됩니다. 순서대로 보는 것을 권합니다.</figcaption>
+    <figcaption>앞 회차의 결론이 다음 회차의 전제가 됩니다. 순서대로 보는 것을 권합니다. 처음이라면 용어 없이 비유로 훑는 '들어가며'를 먼저 보세요. A2A(에이전트 간 위임)는 이 흐름을 전제로 하는 별도 자료입니다.</figcaption>
   </figure>
+
+  <h2>들어가며 — 용어 없이, 놀이공원 비유로 한 바퀴</h2>
+  <div class="grid" style="grid-template-columns:1fr">
+    <article class="deckcard">
+      <div class="n">들어가며 · 약 15분 · 사전 지식 없음</div>
+      <h3>놀이공원으로 이해하는 인증·인가</h3>
+      <p class="one">손님, 매표소, 놀이기구, 심부름 로봇, 안내 데스크. 다섯 등장인물로 시리즈 전체(SSO·Keycloak·BFF·OAuth 2.0·OIDC·A2A)를 먼저 지나간 뒤, 장마다 문장 하나와 그림 하나뿐이고, 마지막에 이름표만 붙입니다. 시리즈를 처음 보는 분은 여기서 시작하세요.</p>
+      <ul>
+        <li>매표소 하나와 손목밴드 (SSO) · 사서 설치하는 부스 (Keycloak)</li>
+        <li>쿠폰 (OAuth 2.0) · 명찰 (OIDC) · 입구 직원의 세 가지 검사 (Resource Server)</li>
+        <li>손목이냐 안내 데스크냐 (BFF) · 친구의 친구 (A2A)</li>
+      </ul>
+      <a class="open" href="00_intro.html">슬라이드 열기</a>
+    </article>
+  </div>
 
   <h2>회차</h2>
   <div class="grid">
@@ -122,17 +131,50 @@
       <a class="open" href="03_bff.html">슬라이드 열기</a>
     </article>
 
+  </div>
+
+  <h2>보충 자료 — 1회차 '개념' 장을 깊게</h2>
+  <div class="grid">
     <article class="deckcard">
-      <div class="n">4회차</div>
+      <div class="n">보충 A · 약 35분</div>
+      <h3>OAuth 2.0 — 권한을 빌려주는 규칙</h3>
+      <p class="one">비밀번호를 넘기지 않고 범위·대상·기한이 있는 토큰을 빌려주는 인가 프레임워크. 답하는 질문: "이 앱이 무엇을 해도 되나".</p>
+      <ul>
+        <li>왜 생겼나 — 제3자 앱에 비밀번호를 주던 시절의 문제</li>
+        <li>승인 방식 지도: Code+PKCE · Client Credentials · Refresh, 폐기된 Implicit·Password와 OAuth 2.1</li>
+        <li>Bearer의 의미, opaque vs JWT, scope는 "무엇을" aud는 "어디에"</li>
+        <li>state · PKCE · redirect_uri · Client 두 종류, Spring 설정 키 대응표</li>
+      </ul>
+      <a class="open" href="oauth2.html">슬라이드 열기</a>
+    </article>
+
+    <article class="deckcard">
+      <div class="n">보충 B · 약 35분</div>
+      <h3>OIDC — 로그인한 사람이 누구인지 알기</h3>
+      <p class="one">OAuth 2.0 위에 얹은 신원 계층. 답하는 질문: "지금 로그인한 사람이 누구인가".</p>
+      <ul>
+        <li>왜 access token으로 로그인하면 뚫리나 — 토큰 바꿔치기</li>
+        <li>ID Token 해부와 7가지 검증, ID vs Access, 사용자 열쇠는 (iss, sub)</li>
+        <li>표준 scope·claim · UserInfo · Discovery · response_type과 nonce</li>
+        <li>RP-Initiated / Back-Channel Logout, <code>OidcUser</code> 대응표</li>
+      </ul>
+      <a class="open" href="oidc.html">슬라이드 열기</a>
+    </article>
+  </div>
+
+  <h2>별도 자료 — 에이전트 간 인증과 위임</h2>
+  <div class="grid" style="grid-template-columns:1fr">
+    <article class="deckcard">
+      <div class="n">별도 · 약 50분 · 전제: 1~3회차</div>
       <h3>A2A — 에이전트 간 인증과 위임</h3>
-      <p class="one">에이전트가 API를 부를 때 "누구"로 부르는가. 사용자 정체성을 잃지 않고 최소 권한으로 위임하는 방법.</p>
+      <p class="one">에이전트가 API를 부를 때 "누구"로 부르는가. 사용자 정체성을 잃지 않고 최소 권한으로 위임하는 방법. 본 시리즈의 결론(SSO · Keycloak · BFF)을 전제로 하지만, 인증·인가의 기본 흐름과는 별개의 주제라 따로 둔다.</p>
       <ul>
         <li>위임 모델 A/B/C: 서비스 계정, 패스스루, Token Exchange</li>
         <li><code>act</code> 클레임과 위임 체인, 멀티 에이전트의 scope/aud 최소화</li>
         <li>MCP 서버 인증(OAuth 2.1)과 A2A 프로토콜의 Agent Card</li>
         <li>감사 로그, 사람 승인 게이트, 프롬프트 인젝션을 권한으로 막기</li>
       </ul>
-      <a class="open" href="04_a2a.html">슬라이드 열기</a>
+      <a class="open" href="a2a.html">슬라이드 열기</a>
     </article>
   </div>
 
