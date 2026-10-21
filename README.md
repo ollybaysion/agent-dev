@@ -37,3 +37,9 @@ seminar/
 ```
 
 새 회차는 `_template.html`을 복사해 만든다. `파일.html?check=1` 로 열면 슬라이드 넘침 검사 결과가 상단에 표시된다.
+
+## reports — 조사 보고서
+
+| 날짜 | 제목 | 파일 |
+|---|---|---|
+| 2026-10-21 | 최근 Claude Code 이슈 총정리 (10-07 ~ 10-21) | [reports/claude_code_issues_2026-10-07_to_10-21.md](reports/claude_code_issues_2026-10-07_to_10-21.md) |
